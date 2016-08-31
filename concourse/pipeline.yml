@@ -1,16 +1,20 @@
 resource_types:
-  - name: pull-request
-    type: docker-image
-    source:
-      repository: jtarchie/pr
+- name: pull-request
+  type: docker-image
+  source:
+    repository: jtarchie/pr
+    tag: "12"
 
 resources:
   - name: gpdb_src
     type: pull-request
     source:
       repo: greenplum-db/gpdb
-      uri: https://github.com/greenplum-db/gpdb
-
+      access_token: {{gpdb_access_token}}
+      private_key: {{gpdb_deploy_key}}
+      git-config:
+      - name: fetch.recurseSubmodules
+        value: false
   - name: gpos_github_release
     type: github-release
     source:
