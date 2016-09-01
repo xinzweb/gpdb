@@ -2,8 +2,7 @@ resource_types:
 - name: pull-request
   type: docker-image
   source:
-    repository: jtarchie/pr
-    tag: "12"
+    repository: xinzweb/pr
 
 resources:
   - name: gpdb_src
@@ -80,8 +79,7 @@ jobs:
               - bin_orca_centos5_release.tar.gz
         - get: bin_xerces
         - get: gpdb_src
-          params:
-            submodules: none
+          version: every
           trigger: true
         - put: gpdb_src
           params:
