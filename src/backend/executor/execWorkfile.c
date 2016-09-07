@@ -30,6 +30,9 @@ static uint64 temp_file_counter = 0;
 static void ExecWorkFile_SetFlags(ExecWorkFile *workfile, bool delOnClose, bool created);
 static void ExecWorkFile_AdjustBFZSize(ExecWorkFile *workfile, int64 file_size);
 
+void UpdateWorkfileSize(const BufFile *buffile, ExecWorkFile *workfile, uint64 reserved_size,
+						uint64 original_committed_size, uint64 new_size);
+
 /*
  * ExecWorkFile_Create
  *    create a new work file with the specified name, the file type,
@@ -224,8 +227,7 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 	}
 
 	/* Test the per-query and per-segment limit */
-	if ((workfile->flags & EXEC_WORKFILE_LIMIT_SIZE) &&
-			!WorkfileDiskspace_Reserve(size))
+	if (!WorkfileDiskspace_Reserve(size))
 	{
 		/* Failed to reserve additional disk space, notify caller */
 		workfile_mgr_report_error();
@@ -237,8 +239,7 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 			{}
 			BufFile *buffile = (BufFile *)workfile->file;
 
-			int64 current_size = BufFileGetSize(buffile);
-			int64 new_size = 0;
+			int64 current_committed_size = BufFileGetSize(buffile);
 
 			PG_TRY();
 			{
@@ -246,19 +247,17 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 			}
 			PG_CATCH();
 			{
-				new_size = BufFileGetSize(buffile);
-				workfile->size = new_size;
-				WorkfileDiskspace_Commit( (new_size - current_size), size, true /* update_query_size */);
+				int64 new_size = BufFileGetSize(buffile);
+
+				IncrementWorkfileSize(workfile, size, new_size - current_committed_size);
 
 				PG_RE_THROW();
 			}
 			PG_END_TRY();
 
-			new_size = BufFileGetSize(buffile);
-			workfile->size = new_size;
+			int64 new_size = BufFileGetSize(buffile);
 
-			WorkfileDiskspace_Commit( (new_size - current_size), size, true /* update_query_size */);
-			workfile_update_in_progress_size(workfile, new_size - current_size);
+			IncrementWorkfileSize(workfile, size, new_size - current_committed_size);
 
 			if (bytes != size)
 			{
@@ -275,19 +274,14 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 			PG_CATCH();
 			{
 				Assert(WorkfileDiskspace_IsFull());
-				WorkfileDiskspace_Commit(0, size, true /* update_query_size */);
+				IncrementWorkfileSize(workfile, size, 0);
 
 				PG_RE_THROW();
 			}
 			PG_END_TRY();
 
 			/* bfz_append always adds to the file size */
-			workfile->size += size;
-			if ((workfile->flags & EXEC_WORKFILE_LIMIT_SIZE))
-			{
-				WorkfileDiskspace_Commit(size, size, true /* update_query_size */);
-			}
-			workfile_update_in_progress_size(workfile, size);
+			IncrementWorkfileSize(workfile, size, size);
 
 			break;
 		default:
@@ -295,6 +289,17 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 	}
 
 	return true;
+}
+
+void IncrementWorkfileSize(ExecWorkFile *workfile, int64 reserved_size,
+						int64 to_be_committed_size) {
+	Assert(reserved_size >= 0);
+	Assert(to_be_committed_size >=0);
+
+	WorkfileDiskspace_Commit(to_be_committed_size, reserved_size, true /* update_query_size */);
+	workfile_update_in_progress_size(workfile, to_be_committed_size);
+
+	workfile->size += to_be_committed_size;
 }
 
 /*
@@ -681,12 +686,6 @@ ExecWorkFile_SetFlags(ExecWorkFile *workfile, bool delOnClose, bool created)
 		elog(gp_workfile_caching_loglevel, "Opened existing workfile %s, delOnClose = %d",
 				ExecWorkFile_GetFileName(workfile), delOnClose);
 	}
-
-	if ((gp_workfile_limit_per_query > 0) || (gp_workfile_limit_per_segment > 0))
-	{
-		workfile->flags |= EXEC_WORKFILE_LIMIT_SIZE;
-	}
-
 }
 
 /*

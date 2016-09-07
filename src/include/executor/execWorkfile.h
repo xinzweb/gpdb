@@ -38,9 +38,6 @@ typedef enum ExecWorkFileType
 /* File was created by us */
 #define EXEC_WORKFILE_CREATED 0x8
 
-/* This file's size should be checked against the set limits during writes */
-#define EXEC_WORKFILE_LIMIT_SIZE 0x10
-
 /* 
  * ExecWorkFile structure.
  */
