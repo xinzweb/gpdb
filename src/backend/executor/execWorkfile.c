@@ -26,12 +26,10 @@
  */
 static uint64 temp_file_counter = 0;
 
-
 static void ExecWorkFile_SetFlags(ExecWorkFile *workfile, bool delOnClose, bool created);
 static void ExecWorkFile_AdjustBFZSize(ExecWorkFile *workfile, int64 file_size);
-
-void UpdateWorkfileSize(const BufFile *buffile, ExecWorkFile *workfile, uint64 reserved_size,
-						uint64 original_committed_size, uint64 new_size);
+static void ExecWorkFile_Increment(ExecWorkFile *workfile, int64 reserved_size,
+                       int64 to_be_committed_size);
 
 /*
  * ExecWorkFile_Create
@@ -206,6 +204,17 @@ ExecWorkFile_Open(const char *fileName,
 	return workfile;
 }
 
+static void
+ExecWorkFile_Increment(ExecWorkFile *workfile, int64 reserved_size,
+                            int64 to_be_committed_size) {
+    Assert(reserved_size >= 0);
+    Assert(to_be_committed_size >=0);
+
+    WorkfileDiskspace_Commit(to_be_committed_size, reserved_size, true /* update_query_size */);
+    workfile_update_in_progress_size(workfile, to_be_committed_size);
+
+    workfile->size += to_be_committed_size;
+}
 
 /*
  * ExecWorkFile_Write
@@ -249,7 +258,7 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 			{
 				int64 new_size = BufFileGetSize(buffile);
 
-				IncrementWorkfileSize(workfile, size, new_size - current_committed_size);
+                ExecWorkFile_Increment(workfile, size, new_size - current_committed_size);
 
 				PG_RE_THROW();
 			}
@@ -257,7 +266,7 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 
 			int64 new_size = BufFileGetSize(buffile);
 
-			IncrementWorkfileSize(workfile, size, new_size - current_committed_size);
+            ExecWorkFile_Increment(workfile, size, new_size - current_committed_size);
 
 			if (bytes != size)
 			{
@@ -274,14 +283,14 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 			PG_CATCH();
 			{
 				Assert(WorkfileDiskspace_IsFull());
-				IncrementWorkfileSize(workfile, size, 0);
+                ExecWorkFile_Increment(workfile, size, 0);
 
 				PG_RE_THROW();
 			}
 			PG_END_TRY();
 
 			/* bfz_append always adds to the file size */
-			IncrementWorkfileSize(workfile, size, size);
+            ExecWorkFile_Increment(workfile, size, size);
 
 			break;
 		default:
@@ -291,16 +300,6 @@ ExecWorkFile_Write(ExecWorkFile *workfile,
 	return true;
 }
 
-void IncrementWorkfileSize(ExecWorkFile *workfile, int64 reserved_size,
-						int64 to_be_committed_size) {
-	Assert(reserved_size >= 0);
-	Assert(to_be_committed_size >=0);
-
-	WorkfileDiskspace_Commit(to_be_committed_size, reserved_size, true /* update_query_size */);
-	workfile_update_in_progress_size(workfile, to_be_committed_size);
-
-	workfile->size += to_be_committed_size;
-}
 
 /*
  * ExecWorkFile_Read
