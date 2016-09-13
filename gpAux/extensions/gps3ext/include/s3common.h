@@ -4,89 +4,32 @@
 #include <map>
 #include <string>
 
-#include <curl/curl.h>
-#include <libxml/parser.h>
-#include <libxml/tree.h>
-
+#include "gpcommon.h"
 #include "http_parser.h"
+#include "s3http_headers.h"
 #include "s3log.h"
+
+#define DATE_STR_LEN 9
+#define TIME_STAMP_STR_LEN 17
 
 using std::string;
 
 struct S3Credential {
-    string keyid;
-    string secret;
-};
+    bool operator==(const S3Credential& other) const {
+        return this->accessID == other.accessID && this->secret == other.secret;
+    }
 
-enum HeaderField {
-    HOST,
-    RANGE,
-    DATE,
-    CONTENTLENGTH,
-    CONTENTMD5,
-    CONTENTTYPE,
-    EXPECT,
-    AUTHORIZATION,
-    ETAG,
-    X_AMZ_DATE,
-    X_AMZ_CONTENT_SHA256,
+    string accessID;
+    string secret;
 };
 
 enum Method { GET, PUT, POST, DELETE, HEAD };
 
-class HeaderContent {
-   public:
-    HeaderContent();
-    ~HeaderContent();
-    bool Add(HeaderField f, const string& value);
-    const char* Get(HeaderField f);
-    void CreateList();
-    struct curl_slist* GetList();
-    void FreeList();
+void SignRequestV4(const string& method, HTTPHeaders* h, const string& orig_region,
+                   const string& path, const string& query, const S3Credential& cred);
 
-   private:
-    struct curl_slist* header_list;
-    std::map<HeaderField, string> fields;
-};
+string get_opt_s3(const string& options, const string& key);
 
-bool SignRequestV4(const string& method, HeaderContent* h,
-                   const string& orig_region, const string& path,
-                   const string& query, const S3Credential& cred);
-
-class UrlParser {
-   public:
-    UrlParser(const char* url);
-    ~UrlParser();
-    const char* Schema() { return this->schema; };
-    const char* Host() { return this->host; };
-    const char* Path() { return this->path; };
-
-    /* data */
-   private:
-    char* extract_field(const struct http_parser_url* u,
-                        http_parser_url_fields i);
-    char* schema;
-    char* host;
-    char* path;
-    char* fullurl;
-};
-
-const char* GetFieldString(HeaderField f);
-CURL* CreateCurlHandler(const char* path);
-
-struct XMLInfo {
-    xmlParserCtxtPtr ctxt;
-};
-
-uint64_t ParserCallback(void* contents, uint64_t size, uint64_t nmemb,
-                        void* userp);
-
-char* get_opt_s3(const char* url, const char* key);
-
-char* truncate_options(const char* url_with_options);
-
-int thread_setup(void);
-
-int thread_cleanup(void);
+string truncate_options(const string& url_with_options);
 
 #endif  // __S3_COMMON_H__

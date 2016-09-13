@@ -28,8 +28,8 @@
 
 List	   *parsetree;			/* result of parsing is left here */
 
-static bool have_lookahead;			/* is lookahead info valid? */
-static int	lookahead_token;		/* one-token lookahead */
+static bool have_lookahead;		/* is lookahead info valid? */
+static int	lookahead_token;	/* one-token lookahead */
 static YYSTYPE lookahead_yylval;	/* yylval for lookahead token */
 static YYLTYPE lookahead_yylloc;	/* yylloc for lookahead token */
 
@@ -59,36 +59,6 @@ raw_parser(const char *str)
 		return NIL;
 
 	return parsetree;
-}
-
-
-/*
- * pg_parse_string_token - get the value represented by a string literal
- *
- * Given the textual form of a SQL string literal, produce the represented
- * value as a palloc'd string.  It is caller's responsibility that the
- * passed string does represent one single string literal.
- *
- * We export this function to avoid having plpgsql depend on internal details
- * of the core grammar (such as the token code assigned to SCONST).  Note
- * that since the scanner isn't presently re-entrant, this cannot be used
- * during use of the main parser/scanner.
- */
-char *
-pg_parse_string_token(const char *token)
-{
-	int			ctoken;
-
-	scanner_init(token);
-
-	ctoken = base_yylex();
-
-	if (ctoken != SCONST)		/* caller error */
-		elog(ERROR, "expected string constant, got token code %d", ctoken);
-
-	scanner_finish();
-
-	return base_yylval.str;
 }
 
 
@@ -128,6 +98,7 @@ filtered_base_yylex(void)
 	switch (cur_token)
 	{
 		case NULLS_P:
+
 			/*
 			 * NULLS FIRST and NULLS LAST must be reduced to one token
 			 */
@@ -156,6 +127,7 @@ filtered_base_yylex(void)
 			break;
 
 		case WITH:
+
 			/*
 			 * WITH TIME, CASCADED, LOCAL, or CHECK must be reduced to one token
 			 *

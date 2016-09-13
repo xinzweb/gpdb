@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_auth_members.h,v 1.3 2007/01/05 22:19:52 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_auth_members.h,v 1.4 2008/01/01 19:45:56 momjian Exp $
  *
  * NOTES
  *	  the genbki.sh script reads this file and generates .bki
@@ -20,30 +20,6 @@
 #define PG_AUTH_MEMBERS_H
 
 #include "catalog/genbki.h"
-
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_auth_members
-   with (camelcase=AuthMem, shared=true, oid=false, relid=1261)
-   (
-   roleid        oid, 
-   member        oid, 
-   grantor       oid, 
-   admin_option  boolean
-   );
-
-   create unique index on pg_auth_members(roleid, member) with (indexid=2694, CamelCase=AuthMemRoleMem, syscacheid=AUTHMEMROLEMEM, syscache_nbuckets=128);
-
-   create unique index on pg_auth_members(member, roleid) with (indexid=2695, CamelCase=AuthMemMemRole, syscacheid=AUTHMEMMEMROLE, syscache_nbuckets=128);
-
-   alter table pg_auth_members add fk roleid  on pg_authid(oid);
-   alter table pg_auth_members add fk member  on pg_authid(oid);
-
-   TIDYCAT_ENDFAKEDEF
-
-   NOTE: we don't mark grantor a foreign key since we don't actually
-   do not remove entries when a grantor is dropped. See DropRole().
-*/
 
 /* ----------------
  *		pg_auth_members definition.  cpp turns this into
@@ -59,6 +35,14 @@ CATALOG(pg_auth_members,1261) BKI_SHARED_RELATION BKI_WITHOUT_OIDS
 	Oid			grantor;		/* who granted the membership */
 	bool		admin_option;	/* granted with admin option? */
 } FormData_pg_auth_members;
+
+/* GPDB added foreign key definitions for gpcheckcat. */
+FOREIGN_KEY(roleid  REFERENCES pg_authid(oid));
+FOREIGN_KEY(member  REFERENCES pg_authid(oid));
+/*
+ * NOTE: we don't mark grantor a foreign key since we don't actually
+ * remove entries when a grantor is dropped. See DropRole().
+ */
 
 /* ----------------
  *		Form_pg_auth_members corresponds to a pointer to a tuple with

@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/catalog/toasting.c,v 1.5 2007/01/09 02:14:11 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/catalog/toasting.c,v 1.9 2008/01/01 19:45:48 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -17,11 +17,11 @@
 #include "access/heapam.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
-#include "catalog/catquery.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/indexing.h"
+#include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_type.h"
@@ -46,25 +46,6 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
  * already done any necessary permission checks.  Callers expect this function
  * to end with CommandCounterIncrement if it makes any changes.
  */
-void
-AlterTableCreateToastTable(Oid relOid)
-{
-	Relation	rel;
-	bool is_part_child = !rel_needs_long_lock(relOid);
-
-	/*
-	 * Grab an exclusive lock on the target table, which we will NOT release
-	 * until end of transaction.  (This is probably redundant in all present
-	 * uses...)
-	 */
-	rel = heap_open(relOid, AccessExclusiveLock);
-
-	/* create_toast_table does all the work */
-	(void) create_toast_table(rel, InvalidOid, InvalidOid, NULL, is_part_child);
-
-	heap_close(rel, NoLock);
-}
-
 void
 AlterTableCreateToastTableWithOid(Oid relOid, Oid newOid, Oid newIndexOid,
 								  Oid * comptypeOid, bool is_part_child)
@@ -136,6 +117,7 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
 	Relation	class_rel;
 	Oid			toast_relid;
 	Oid			toast_idxid;
+	Oid			namespaceid;
 	char		toast_relname[NAMEDATALEN];
 	char		toast_idxname[NAMEDATALEN];
 	IndexInfo  *indexInfo;
@@ -143,8 +125,6 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
 	int16		coloptions[2];
 	ObjectAddress baseobject,
 				toastobject;
-	cqContext	cqc;
-	cqContext  *pcqCtx;
 
 	/*
 	 * Is it already toasted?
@@ -203,17 +183,21 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
 	tupdesc->attrs[2]->attstorage = 'p';
 
 	/*
-	 * Note: the toast relation is placed in the regular pg_toast namespace
-	 * even if its master relation is a temp table.  There cannot be any
-	 * naming collision, and the toast rel will be destroyed when its master
-	 * is, so there's no need to handle the toast rel as temp.
-	 *
+	 * Toast tables for regular relations go in pg_toast; those for temp
+	 * relations go into the per-backend temp-toast-table namespace.
+	 */
+	if (rel->rd_istemp)
+		namespaceid = GetTempToastNamespace();
+	else
+		namespaceid = PG_TOAST_NAMESPACE;
+
+	/*
 	 * XXX would it make sense to apply the master's reloptions to the toast
-	 * table?
+	 * table?  Or maybe some toast-specific reloptions?
 	 */
 	Oid unusedTypArrayOid = InvalidOid;
 	toast_relid = heap_create_with_catalog(toast_relname,
-										   PG_TOAST_NAMESPACE,
+										   namespaceid,
 										   rel->rd_rel->reltablespace,
 										   toastOid,
 										   rel->rd_rel->relowner,
@@ -259,7 +243,9 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
 	indexInfo->ii_Predicate = NIL;
 	indexInfo->ii_PredicateState = NIL;
 	indexInfo->ii_Unique = true;
+	indexInfo->ii_ReadyForInserts = true;
 	indexInfo->ii_Concurrent = false;
+	indexInfo->ii_BrokenHotChain = false;
 
 	classObjectId[0] = OID_BTREE_OPS_OID;
 	classObjectId[1] = INT4_BTREE_OPS_OID;
@@ -289,15 +275,9 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
 	 */
 	class_rel = heap_open(RelationRelationId, RowExclusiveLock);
 
-	pcqCtx = caql_addrel(cqclr(&cqc), class_rel);
-
-	reltup = caql_getfirst(
-			pcqCtx,
-			cql("SELECT * FROM pg_class "
-				" WHERE oid = :1 "
-				" FOR UPDATE ",
-				ObjectIdGetDatum(relOid)));
-
+	reltup = SearchSysCacheCopy(RELOID,
+								ObjectIdGetDatum(relOid),
+								0, 0, 0);
 	if (!HeapTupleIsValid(reltup))
 		elog(ERROR, "cache lookup failed for relation %u", relOid);
 
@@ -306,8 +286,10 @@ create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
 	if (!IsBootstrapProcessingMode())
 	{
 		/* normal case, use a transactional update */
-		caql_update_current(pcqCtx, reltup);
-		/* and Update indexes (implicit) */
+		simple_heap_update(class_rel, &reltup->t_self, reltup);
+
+		/* Keep catalog indexes current */
+		CatalogUpdateIndexes(class_rel, reltup);
 	}
 	else
 	{
@@ -371,7 +353,7 @@ RelationNeedsToastTable(Relation rel)
 	{
 		if (att[i]->attisdropped)
 			continue;
-		data_length = att_align(data_length, att[i]->attalign);
+		data_length = att_align_nominal(data_length, att[i]->attalign);
 		if (att[i]->attlen > 0)
 		{
 			/* Fixed-length types are never toastable */

@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_trigger.h,v 1.27 2007/02/14 01:58:58 tgl Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_trigger.h,v 1.30 2008/01/01 19:45:57 momjian Exp $
  *
  * NOTES
  *	  the genbki.sh script reads this file and generates .bki
@@ -20,39 +20,6 @@
 #define PG_TRIGGER_H
 
 #include "catalog/genbki.h"
-
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_trigger
-   with (relid=2620)
-   (
-   tgrelid         oid, 
-   tgname          name, 
-   tgfoid          oid, 
-   tgtype          smallint, 
-   tgenabled       boolean, 
-   tgisconstraint  boolean, 
-   tgconstrname    name, 
-   tgconstrrelid   oid, 
-   tgconstraint    oid,
-   tgdeferrable    boolean, 
-   tginitdeferred  boolean, 
-   tgnargs         smallint, 
-   tgattr          int2vector, 
-   tgargs          bytea
-   );
-
-   create index on pg_trigger(tgconstrname) with (indexid=2699, CamelCase=TriggerConstrName);
-   create index on pg_trigger(tgconstrrelid) with (indexid=2700, CamelCase=TriggerConstrRelid);
-   create unique index on pg_trigger(tgrelid, tgname) with (indexid=2701, CamelCase=TriggerRelidName);
-   create unique index on pg_trigger(oid) with (indexid=2702, CamelCase=TriggerOid);
-
-   alter table pg_trigger add fk tgrelid on pg_class(oid);
-   alter table pg_trigger add fk tgfoid on pg_proc(oid);
-   alter table pg_trigger add fk tgconstrrelid on pg_class(oid);
-
-   TIDYCAT_ENDFAKEDEF
-*/
 
 /* ----------------
  *		pg_trigger definition.	cpp turns this into
@@ -74,7 +41,8 @@ CATALOG(pg_trigger,2620)
 	Oid			tgfoid;			/* OID of function to be called */
 	int2		tgtype;			/* BEFORE/AFTER UPDATE/DELETE/INSERT
 								 * ROW/STATEMENT; see below */
-	bool		tgenabled;		/* trigger is enabled/disabled */
+	char		tgenabled;		/* trigger's firing configuration WRT
+								 * session_replication_role */
 	bool		tgisconstraint; /* trigger is a constraint trigger */
 	NameData	tgconstrname;	/* constraint name */
 	Oid			tgconstrrelid;	/* constraint's FROM table, if any */
@@ -87,6 +55,11 @@ CATALOG(pg_trigger,2620)
 	int2vector	tgattr;			/* reserved for column-specific triggers */
 	bytea		tgargs;			/* first\000second\000tgnargs\000 */
 } FormData_pg_trigger;
+
+/* GPDB added foreign key definitions for gpcheckcat. */
+FOREIGN_KEY(tgrelid REFERENCES pg_class(oid));
+FOREIGN_KEY(tgfoid REFERENCES pg_proc(oid));
+FOREIGN_KEY(tgconstrrelid REFERENCES pg_class(oid));
 
 /* ----------------
  *		Form_pg_trigger corresponds to a pointer to a tuple with

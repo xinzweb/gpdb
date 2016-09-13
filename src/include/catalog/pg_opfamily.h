@@ -5,10 +5,10 @@
  *	  along with the relation's initial contents.
  *
  *
- * Portions Copyright (c) 1996-2007, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_opfamily.h,v 1.3 2007/01/28 16:16:52 neilc Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_opfamily.h,v 1.7 2008/01/01 19:45:57 momjian Exp $
  *
  * NOTES
  *	  the genbki.sh script reads this file and generates .bki
@@ -19,6 +19,8 @@
 #ifndef PG_OPFAMILY_H
 #define PG_OPFAMILY_H
 
+#include "catalog/genbki.h"
+
 /* ----------------
  *		postgres.h contains the system type definitions and the
  *		CATALOG(), BKI_BOOTSTRAP and DATA() sugar words so this file
@@ -26,29 +28,8 @@
  * ----------------
  */
 
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_opfamily
-   with (camelcase=OperatorFamily, shared=false, relid=2753)
-   (
-   opfmethod     oid     ,
-   opfname       name    ,
-   opfnamespace  oid     ,
-   opfowner      oid
-   );
-
-   create unique index on pg_opfamily(opfmethod, opfname, opfnamespace) with (indexid=2754, CamelCase=OpfamilyAmNameNsp, syscacheid=OPFAMILYAMNAMENSP, syscache_nbuckets=64);
-   create unique index on pg_opfamily(oid) with (indexid=2755, CamelCase=OpfamilyOid, syscacheid=OPFAMILYOID, syscache_nbuckets=64);
-
-   alter table pg_opfamily add fk opfmethod on pg_am(oid);
-   alter table pg_opfamily add fk opfnamespace on pg_namespace(oid);
-   alter table pg_opfamily add fk opfowner on pg_authid(oid);
-
-   TIDYCAT_ENDFAKEDEF
-*/
-
 /* ----------------
- *		pg_opfamily definition.	cpp turns this into
+ *		pg_opfamily definition. cpp turns this into
  *		typedef struct FormData_pg_opfamily
  * ----------------
  */
@@ -61,6 +42,11 @@ CATALOG(pg_opfamily,2753)
 	Oid			opfnamespace;	/* namespace of this opfamily */
 	Oid			opfowner;		/* opfamily owner */
 } FormData_pg_opfamily;
+
+/* GPDB added foreign key definitions for gpcheckcat. */
+FOREIGN_KEY(opfmethod REFERENCES pg_am(oid));
+FOREIGN_KEY(opfnamespace REFERENCES pg_namespace(oid));
+FOREIGN_KEY(opfowner REFERENCES pg_authid(oid));
 
 /* ----------------
  *		Form_pg_opfamily corresponds to a pointer to a tuple with
@@ -158,6 +144,13 @@ DATA(insert OID = 2595 (	783		circle_ops		PGNSP PGUID ));
 DATA(insert OID = 2745 (	2742	array_ops		PGNSP PGUID ));
 DATA(insert OID = 2968 (	403		uuid_ops		PGNSP PGUID ));
 DATA(insert OID = 2969 (	405		uuid_ops		PGNSP PGUID ));
+DATA(insert OID = 3522 (	403		enum_ops		PGNSP PGUID ));
+DATA(insert OID = 3523 (	405		enum_ops		PGNSP PGUID ));
+DATA(insert OID = 3626 (	403		tsvector_ops	PGNSP PGUID ));
+DATA(insert OID = 3655 (	783		tsvector_ops	PGNSP PGUID ));
+DATA(insert OID = 3659 (	2742	tsvector_ops	PGNSP PGUID ));
+DATA(insert OID = 3683 (	403		tsquery_ops		PGNSP PGUID ));
+DATA(insert OID = 3702 (	783		tsquery_ops		PGNSP PGUID ));
 
 /* Complex Number type */
 DATA(insert OID = 3221 (	403		complex_ops		PGNSP PGUID ));

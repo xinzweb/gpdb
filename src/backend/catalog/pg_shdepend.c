@@ -8,7 +8,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/catalog/pg_shdepend.c,v 1.16 2007/01/05 22:19:25 momjian Exp $
+ *	  $PostgreSQL: pgsql/src/backend/catalog/pg_shdepend.c,v 1.23.2.3 2010/07/03 13:53:38 rhaas Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -18,7 +18,6 @@
 #include "access/heapam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
-#include "catalog/catquery.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_authid.h"
@@ -27,12 +26,15 @@
 #include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_operator.h"
+#include "catalog/pg_opclass.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_shdepend.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
 #include "commands/conversioncmds.h"
 #include "commands/defrem.h"
+#include "commands/proclang.h"
 #include "commands/schemacmds.h"
 #include "commands/tablecmds.h"
 #include "commands/typecmds.h"
@@ -166,11 +168,10 @@ shdepChangeDep(Relation sdepRel, Oid classid, Oid objid,
 			   SharedDependencyType deptype)
 {
 	Oid			dbid = classIdGetDbId(classid);
-	bool		bGotOne = false;
 	HeapTuple	oldtup = NULL;
 	HeapTuple	scantup;
-	cqContext  *pcqCtx;
-	cqContext	cqc;
+	ScanKeyData key[3];
+	SysScanDesc scan;
 
 	/*
 	 * Make sure the new referenced object doesn't go away while we record the
@@ -181,61 +182,59 @@ shdepChangeDep(Relation sdepRel, Oid classid, Oid objid,
 	/*
 	 * Look for a previous entry
 	 */
-	
-	pcqCtx = caql_beginscan(
-			caql_addrel(cqclr(&cqc), sdepRel),
-			cql("SELECT * FROM pg_shdepend "
-				" WHERE dbid = :1 "
-				" AND classid = :2 "
-				" AND objid = :3 "
-				" FOR UPDATE ",
-				ObjectIdGetDatum(dbid),
-				ObjectIdGetDatum(classid),
-				ObjectIdGetDatum(objid)));
+	ScanKeyInit(&key[0],
+				Anum_pg_shdepend_dbid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(dbid));
+	ScanKeyInit(&key[1],
+				Anum_pg_shdepend_classid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(classid));
+	ScanKeyInit(&key[2],
+				Anum_pg_shdepend_objid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(objid));
 
-	while (HeapTupleIsValid(scantup = caql_getnext(pcqCtx)))
+	scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true,
+							  SnapshotNow, 3, key);
+
+	while ((scantup = systable_getnext(scan)) != NULL)
 	{
 		/* Ignore if not of the target dependency type */
 		if (((Form_pg_shdepend) GETSTRUCT(scantup))->deptype != deptype)
 			continue;
 		/* Caller screwed up if multiple matches */
-		if (bGotOne)
+		if (oldtup)
 			elog(ERROR,
 				 "multiple pg_shdepend entries for object %u/%u deptype %c",
 				 classid, objid, deptype);
-		bGotOne = true;
+		oldtup = heap_copytuple(scantup);
 	}
-	caql_endscan(pcqCtx);
 
-	/* XXX XXX XXX XXX XXX XXX XXX XXX XXX
-	 * Should match this logic:
-	 *
-	 *  if isSharedObjectpinned
-	 *     if Gotone then drop it
-	 *  else 
-     *     if Gotone 
-     *     then update it
-     *     else insert it
-	 *
-	 * XXX XXX XXX XXX XXX XXX XXX XXX XXX
-	 */ 
+	systable_endscan(scan);
 
-	if (!bGotOne) /* no match */
+	if (isSharedObjectPinned(refclassid, refobjid, sdepRel))
 	{
-		/* if no match and pinned, new entry not needed */
-		if (isSharedObjectPinned(refclassid, refobjid, sdepRel))
-		{
-			/* just return -- don't need to free anything because
-			 * sdelRel was passed in, and pcqCtx is freed 
-			 */
-			return;
-		}
+		/* No new entry needed, so just delete existing entry if any */
+		if (oldtup)
+			simple_heap_delete(sdepRel, &oldtup->t_self);
+	}
+	else if (oldtup)
+	{
+		/* Need to update existing entry */
+		Form_pg_shdepend shForm = (Form_pg_shdepend) GETSTRUCT(oldtup);
 
-		pcqCtx = caql_beginscan(
-				caql_addrel(cqclr(&cqc), sdepRel),
-				cql("INSERT INTO pg_shdepend ",
-					NULL));
+		/* Since oldtup is a copy, we can just modify it in-memory */
+		shForm->refclassid = refclassid;
+		shForm->refobjid = refobjid;
 
+		simple_heap_update(sdepRel, &oldtup->t_self, oldtup);
+
+		/* keep indexes current */
+		CatalogUpdateIndexes(sdepRel, oldtup);
+	}
+	else
+	{
 		/* Need to insert new entry */
 		Datum		values[Natts_pg_shdepend];
 		bool		nulls[Natts_pg_shdepend];
@@ -254,64 +253,15 @@ shdepChangeDep(Relation sdepRel, Oid classid, Oid objid,
 		 * we are reusing oldtup just to avoid declaring a new variable, but
 		 * it's certainly a new tuple
 		 */
-		oldtup = caql_form_tuple(pcqCtx, values, nulls);
-		caql_insert(pcqCtx, oldtup);
-		/* and Update indexes (implicit) */
+		oldtup = heap_form_tuple(RelationGetDescr(sdepRel), values, nulls);
+		simple_heap_insert(sdepRel, oldtup);
 
+		/* keep indexes current */
+		CatalogUpdateIndexes(sdepRel, oldtup);
+	}
+
+	if (oldtup)
 		heap_freetuple(oldtup);
-		caql_endscan(pcqCtx);
-	}
-	else
-	{
-		/* XXX XXX Do the scan again, but do the update/delete this time */
-
-		pcqCtx = caql_beginscan(
-				caql_addrel(cqclr(&cqc), sdepRel),
-				cql("SELECT * FROM pg_shdepend "
-					" WHERE dbid = :1 "
-					" AND classid = :2 "
-					" AND objid = :3 "
-					" FOR UPDATE ",
-					ObjectIdGetDatum(dbid),
-					ObjectIdGetDatum(classid),
-					ObjectIdGetDatum(objid)));
-
-		while (HeapTupleIsValid(scantup = caql_getnext(pcqCtx)))
-		{
-			/* Ignore if not of the target dependency type */
-			if (((Form_pg_shdepend) GETSTRUCT(scantup))->deptype != deptype)
-				continue;
-			/* 
-			 * NOTE: already tested for multiple matches - just use
-			 * first one 
-			 */
-
-			if (isSharedObjectPinned(refclassid, refobjid, sdepRel))
-			{
-				/* No new entry needed, so just delete existing entry if any */
-				caql_delete_current(pcqCtx);
-			}
-			else
-			{
-				oldtup = heap_copytuple(scantup);
-
-				/* Need to update existing entry */
-				Form_pg_shdepend shForm = (Form_pg_shdepend) GETSTRUCT(oldtup);
-
-				/* Since oldtup is a copy, we can just modify it in-memory */
-				shForm->refclassid = refclassid;
-				shForm->refobjid = refobjid;
-
-				caql_update_current(pcqCtx, oldtup);
-				/* and Update indexes (implicit) */
-
-				heap_freetuple(oldtup);
-			}
-			break;
-		}
-		caql_endscan(pcqCtx);
-	}
-
 }
 
 /*
@@ -509,6 +459,9 @@ typedef struct
  * Check whether there are shared dependency entries for a given shared
  * object.	Returns a string containing a newline-separated list of object
  * descriptions that depend on the shared object, or NULL if none is found.
+ * The size of the returned string is limited to about MAX_REPORTED_DEPS lines;
+ * if there are more objects than that, the output is returned truncated at
+ * that point while the full message is logged to the postmaster log.
  *
  * We can find three different kinds of dependencies: dependencies on objects
  * of the current database; dependencies on shared objects; and dependencies
@@ -521,33 +474,46 @@ typedef struct
 char *
 checkSharedDependencies(Oid classId, Oid objectId)
 {
+	Relation	sdepRel;
+	ScanKeyData key[2];
+	SysScanDesc scan;
 	HeapTuple	tup;
-	cqContext  *pcqCtx;	
-	int			totalDeps = 0;
-	int			numLocalDeps = 0;
-	int			numSharedDeps = 0;
+	int			numReportedDeps = 0;
+	int			numNotReportedDeps = 0;
+	int			numNotReportedDbs = 0;
 	List	   *remDeps = NIL;
 	ListCell   *cell;
 	ObjectAddress object;
 	StringInfoData descs;
+	StringInfoData alldescs;
 
 	/*
-	 * We try to limit the number of reported dependencies to something sane,
-	 * both for the user's sake and to avoid blowing out memory.
+	 * We limit the number of dependencies reported to the client to
+	 * MAX_REPORTED_DEPS, since client software may not deal well with
+	 * enormous error strings.	The server log always gets a full report,
+	 * which is collected in a separate StringInfo if and only if we detect
+	 * that the client report is going to be truncated.
 	 */
 #define MAX_REPORTED_DEPS 100
 
 	initStringInfo(&descs);
+	initStringInfo(&alldescs);
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_shdepend "
-				" WHERE refclassid = :1 "
-				" AND refobjid = :2 ",
-				ObjectIdGetDatum(classId),
-				ObjectIdGetDatum(objectId)));
+	sdepRel = heap_open(SharedDependRelationId, AccessShareLock);
 
-	while (HeapTupleIsValid(tup = caql_getnext(pcqCtx)))
+	ScanKeyInit(&key[0],
+				Anum_pg_shdepend_refclassid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(classId));
+	ScanKeyInit(&key[1],
+				Anum_pg_shdepend_refobjid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(objectId));
+
+	scan = systable_beginscan(sdepRel, SharedDependReferenceIndexId, true,
+							  SnapshotNow, 2, key);
+
+	while (HeapTupleIsValid(tup = systable_getnext(scan)))
 	{
 		Form_pg_shdepend sdepForm = (Form_pg_shdepend) GETSTRUCT(tup);
 
@@ -576,17 +542,41 @@ checkSharedDependencies(Oid classId, Oid objectId)
 		 */
 		if (sdepForm->dbid == MyDatabaseId)
 		{
-			numLocalDeps++;
-			if (++totalDeps <= MAX_REPORTED_DEPS)
+			if (numReportedDeps < MAX_REPORTED_DEPS)
+			{
+				numReportedDeps++;
 				storeObjectDescription(&descs, LOCAL_OBJECT, &object,
 									   sdepForm->deptype, 0);
+			}
+			else
+			{
+				numNotReportedDeps++;
+				/* initialize the server-only log line */
+				if (alldescs.len == 0)
+					appendBinaryStringInfo(&alldescs, descs.data, descs.len);
+
+				storeObjectDescription(&alldescs, LOCAL_OBJECT, &object,
+									   sdepForm->deptype, 0);
+			}
 		}
 		else if (sdepForm->dbid == InvalidOid)
 		{
-			numSharedDeps++;
-			if (++totalDeps <= MAX_REPORTED_DEPS)
+			if (numReportedDeps < MAX_REPORTED_DEPS)
+			{
+				numReportedDeps++;
 				storeObjectDescription(&descs, SHARED_OBJECT, &object,
 									   sdepForm->deptype, 0);
+			}
+			else
+			{
+				numNotReportedDeps++;
+				/* initialize the server-only log line */
+				if (alldescs.len == 0)
+					appendBinaryStringInfo(&alldescs, descs.data, descs.len);
+
+				storeObjectDescription(&alldescs, SHARED_OBJECT, &object,
+									   sdepForm->deptype, 0);
+			}
 		}
 		else
 		{
@@ -616,36 +606,19 @@ checkSharedDependencies(Oid classId, Oid objectId)
 				dep->dbOid = sdepForm->dbid;
 				dep->count = 1;
 				remDeps = lappend(remDeps, dep);
-				totalDeps++;
 			}
 		}
 	}
 
-	caql_endscan(pcqCtx);
+	systable_endscan(scan);
 
-	if (totalDeps > MAX_REPORTED_DEPS)
-	{
-		/*
-		 * Report seems unreasonably long, so reduce it to per-database info
-		 *
-		 * Note: we don't ever suppress per-database totals, which should be
-		 * OK as long as there aren't too many databases ...
-		 */
-		descs.len = 0;			/* reset to empty */
-		descs.data[0] = '\0';
+	heap_close(sdepRel, AccessShareLock);
 
-		if (numLocalDeps > 0)
-		{
-			appendStringInfo(&descs, _("%d objects in this database"),
-							 numLocalDeps);
-			if (numSharedDeps > 0)
-				appendStringInfoChar(&descs, '\n');
-		}
-		if (numSharedDeps > 0)
-			appendStringInfo(&descs, _("%d shared objects"),
-							 numSharedDeps);
-	}
-
+	/*
+	 * Report dependencies on remote databases.  If we're truncating the
+	 * output already, don't put a line per database, but a single one for all
+	 * of them.  Otherwise add as many as fit in MAX_REPORTED_DEPS.
+	 */
 	foreach(cell, remDeps)
 	{
 		remoteDep  *dep = lfirst(cell);
@@ -654,8 +627,22 @@ checkSharedDependencies(Oid classId, Oid objectId)
 		object.objectId = dep->dbOid;
 		object.objectSubId = 0;
 
-		storeObjectDescription(&descs, REMOTE_OBJECT, &object,
-							   SHARED_DEPENDENCY_INVALID, dep->count);
+		if (numReportedDeps < MAX_REPORTED_DEPS)
+		{
+			numReportedDeps++;
+			storeObjectDescription(&descs, REMOTE_OBJECT, &object,
+								   SHARED_DEPENDENCY_INVALID, dep->count);
+		}
+		else
+		{
+			numNotReportedDbs++;
+			/* initialize the server-only log line */
+			if (alldescs.len == 0)
+				appendBinaryStringInfo(&alldescs, descs.data, descs.len);
+
+			storeObjectDescription(&alldescs, REMOTE_OBJECT, &object,
+								   SHARED_DEPENDENCY_INVALID, dep->count);
+		}
 	}
 
 	list_free_deep(remDeps);
@@ -663,8 +650,33 @@ checkSharedDependencies(Oid classId, Oid objectId)
 	if (descs.len == 0)
 	{
 		pfree(descs.data);
+		pfree(alldescs.data);
 		return NULL;
 	}
+
+	if (numNotReportedDeps > 0)
+		appendStringInfo(&descs, _("\nand %d other objects "
+								   "(see server log for list)"),
+						 numNotReportedDeps);
+	if (numNotReportedDbs > 0)
+		appendStringInfo(&descs, _("\nand objects in %d other databases "
+								   "(see server log for list)"),
+						 numNotReportedDbs);
+
+	if (numNotReportedDeps > 0 || numNotReportedDbs > 0)
+	{
+		ObjectAddress obj;
+
+		obj.classId = classId;
+		obj.objectId = objectId;
+		obj.objectSubId = 0;
+		ereport(LOG,
+				(errmsg("there are objects dependent on %s",
+						getObjectDescription(&obj)),
+				 errdetail("%s", alldescs.data)));
+	}
+
+	pfree(alldescs.data);
 
 	return descs.data;
 }
@@ -678,20 +690,29 @@ checkSharedDependencies(Oid classId, Oid objectId)
 void
 copyTemplateDependencies(Oid templateDbId, Oid newDbId)
 {
-	cqContext  *pcqCtx;
+	Relation	sdepRel;
+	TupleDesc	sdepDesc;
+	ScanKeyData key[1];
+	SysScanDesc scan;
 	HeapTuple	tup;
+	CatalogIndexState indstate;
 	Datum		values[Natts_pg_shdepend];
 	bool		nulls[Natts_pg_shdepend];
 	bool		replace[Natts_pg_shdepend];
 
+	sdepRel = heap_open(SharedDependRelationId, RowExclusiveLock);
+	sdepDesc = RelationGetDescr(sdepRel);
+
+	indstate = CatalogOpenIndexes(sdepRel);
 
 	/* Scan all entries with dbid = templateDbId */
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_shdepend "
-				" WHERE dbid = :1 "
-				" FOR UPDATE ",
-				ObjectIdGetDatum(templateDbId)));
+	ScanKeyInit(&key[0],
+				Anum_pg_shdepend_dbid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(templateDbId));
+
+	scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true,
+							  SnapshotNow, 1, key);
 
 	/* Set up to copy the tuples except for inserting newDbId */
 	memset(values, 0, sizeof(values));
@@ -708,18 +729,23 @@ copyTemplateDependencies(Oid templateDbId, Oid newDbId)
 	 * copy the ownership dependency of the template database itself; this is
 	 * what we want.
 	 */
-	while (HeapTupleIsValid(tup = caql_getnext(pcqCtx)))
+	while (HeapTupleIsValid(tup = systable_getnext(scan)))
 	{
 		HeapTuple	newtup;
 
-		newtup = caql_modify_current(pcqCtx, values, nulls, replace);
-		caql_insert(pcqCtx, newtup);
-		/* and Update indexes (implicit) */
+		newtup = heap_modify_tuple(tup, sdepDesc, values, nulls, replace);
+		simple_heap_insert(sdepRel, newtup);
+
+		/* Keep indexes current */
+		CatalogIndexInsert(indstate, newtup);
 
 		heap_freetuple(newtup);
 	}
 
-	caql_endscan(pcqCtx);
+	systable_endscan(scan);
+
+	CatalogCloseIndexes(indstate);
+	heap_close(sdepRel, RowExclusiveLock);
 }
 
 /*
@@ -732,8 +758,9 @@ void
 dropDatabaseDependencies(Oid databaseId)
 {
 	Relation	sdepRel;
-	cqContext	cqc;
-	int			numDel;
+	ScanKeyData key[1];
+	SysScanDesc scan;
+	HeapTuple	tup;
 
 	sdepRel = heap_open(SharedDependRelationId, RowExclusiveLock);
 
@@ -741,12 +768,21 @@ dropDatabaseDependencies(Oid databaseId)
 	 * First, delete all the entries that have the database Oid in the dbid
 	 * field.
 	 */
-	numDel = caql_getcount(
-			caql_addrel(cqclr(&cqc), sdepRel),
-			cql("DELETE FROM pg_shdepend "
-				" WHERE dbid = :1 ",
-				ObjectIdGetDatum(databaseId)));
+	ScanKeyInit(&key[0],
+				Anum_pg_shdepend_dbid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(databaseId));
 	/* We leave the other index fields unspecified */
+
+	scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true,
+							  SnapshotNow, 1, key);
+
+	while (HeapTupleIsValid(tup = systable_getnext(scan)))
+	{
+		simple_heap_delete(sdepRel, &tup->t_self);
+	}
+
+	systable_endscan(scan);
 
 	/* Now delete all entries corresponding to the database itself */
 	shdepDropDependency(sdepRel, DatabaseRelationId, databaseId,
@@ -792,8 +828,6 @@ shdepAddDependency(Relation sdepRel, Oid classId, Oid objectId,
 	HeapTuple	tup;
 	Datum		values[Natts_pg_shdepend];
 	bool		nulls[Natts_pg_shdepend];
-	cqContext  *pcqCtx;
-	cqContext	cqc;
 
 	/*
 	 * Make sure the object doesn't go away while we record the dependency on
@@ -801,11 +835,6 @@ shdepAddDependency(Relation sdepRel, Oid classId, Oid objectId,
 	 * shared dependencies.
 	 */
 	shdepLockAndCheckObject(refclassId, refobjId);
-	
-	pcqCtx = caql_beginscan(
-			caql_addrel(cqclr(&cqc), sdepRel),
-			cql("INSERT INTO pg_shdepend ",
-				NULL));
 
 	memset(nulls, false, sizeof(nulls));
 
@@ -820,14 +849,15 @@ shdepAddDependency(Relation sdepRel, Oid classId, Oid objectId,
 	values[Anum_pg_shdepend_refobjid - 1] = ObjectIdGetDatum(refobjId);
 	values[Anum_pg_shdepend_deptype - 1] = CharGetDatum(deptype);
 
-	tup = caql_form_tuple(pcqCtx, values, nulls);
+	tup = heap_form_tuple(sdepRel->rd_att, values, nulls);
 
-	caql_insert(pcqCtx, tup);
-	/* and Update indexes (implicit) */
+	simple_heap_insert(sdepRel, tup);
+
+	/* keep indexes current */
+	CatalogUpdateIndexes(sdepRel, tup);
 
 	/* clean up */
 	heap_freetuple(tup);
-	caql_endscan(pcqCtx);
 }
 
 /*
@@ -848,23 +878,28 @@ shdepDropDependency(Relation sdepRel, Oid classId, Oid objectId,
 					Oid refclassId, Oid refobjId,
 					SharedDependencyType deptype)
 {
+	ScanKeyData key[3];
+	SysScanDesc scan;
 	HeapTuple	tup;
-	cqContext  *pcqCtx;
-	cqContext	cqc;
 
 	/* Scan for entries matching the dependent object */
-	pcqCtx = caql_beginscan(
-			caql_addrel(cqclr(&cqc), sdepRel),
-			cql("SELECT * FROM pg_shdepend "
-				" WHERE dbid = :1 "
-				" AND classid = :2 "
-				" AND objid = :3 "
-				" FOR UPDATE ",
-				ObjectIdGetDatum(classIdGetDbId(classId)),
-				ObjectIdGetDatum(classId),
-				ObjectIdGetDatum(objectId)));
+	ScanKeyInit(&key[0],
+				Anum_pg_shdepend_dbid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(classIdGetDbId(classId)));
+	ScanKeyInit(&key[1],
+				Anum_pg_shdepend_classid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(classId));
+	ScanKeyInit(&key[2],
+				Anum_pg_shdepend_objid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(objectId));
 
-	while (HeapTupleIsValid(tup = caql_getnext(pcqCtx)))
+	scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true,
+							  SnapshotNow, 3, key);
+
+	while (HeapTupleIsValid(tup = systable_getnext(scan)))
 	{
 		Form_pg_shdepend shdepForm = (Form_pg_shdepend) GETSTRUCT(tup);
 
@@ -878,10 +913,10 @@ shdepDropDependency(Relation sdepRel, Oid classId, Oid objectId,
 			continue;
 
 		/* OK, delete it */
-		caql_delete_current(pcqCtx);
+		simple_heap_delete(sdepRel, &tup->t_self);
 	}
 
-	caql_endscan(pcqCtx);
+	systable_endscan(scan);
 }
 
 /*
@@ -921,17 +956,13 @@ shdepLockAndCheckObject(Oid classId, Oid objectId)
 	switch (classId)
 	{
 		case AuthIdRelationId:
-			if (0 == caql_getcount(
-						NULL,
-						cql("SELECT COUNT(*) FROM pg_authid "
-							" WHERE oid = :1 ",
-							ObjectIdGetDatum(objectId))))
-			{
+			if (!SearchSysCacheExists(AUTHOID,
+									  ObjectIdGetDatum(objectId),
+									  0, 0, 0))
 				ereport(ERROR,
 						(errcode(ERRCODE_UNDEFINED_OBJECT),
 						 errmsg("role %u was concurrently dropped",
 								objectId)));
-			}
 			break;
 
 			/*
@@ -1025,16 +1056,21 @@ static bool
 isSharedObjectPinned(Oid classId, Oid objectId, Relation sdepRel)
 {
 	bool		result = false;
+	ScanKeyData key[2];
+	SysScanDesc scan;
 	HeapTuple	tup;
-	cqContext	cqc;
 
-	tup = caql_getfirst(
-			caql_addrel(cqclr(&cqc), sdepRel),
-			cql("SELECT * FROM pg_shdepend "
-				" WHERE refclassid = :1 "
-				" AND refobjid = :2 ",
-				ObjectIdGetDatum(classId),
-				ObjectIdGetDatum(objectId)));
+	ScanKeyInit(&key[0],
+				Anum_pg_shdepend_refclassid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(classId));
+	ScanKeyInit(&key[1],
+				Anum_pg_shdepend_refobjid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(objectId));
+
+	scan = systable_beginscan(sdepRel, SharedDependReferenceIndexId, true,
+							  SnapshotNow, 2, key);
 
 	/*
 	 * Since we won't generate additional pg_shdepend entries for pinned
@@ -1042,7 +1078,7 @@ isSharedObjectPinned(Oid classId, Oid objectId, Relation sdepRel)
 	 * Hence, it's sufficient to look at the first returned tuple; we don't
 	 * need to loop.
 	 */
-
+	tup = systable_getnext(scan);
 	if (HeapTupleIsValid(tup))
 	{
 		Form_pg_shdepend shdepForm = (Form_pg_shdepend) GETSTRUCT(tup);
@@ -1050,6 +1086,8 @@ isSharedObjectPinned(Oid classId, Oid objectId, Relation sdepRel)
 		if (shdepForm->deptype == SHARED_DEPENDENCY_PIN)
 			result = true;
 	}
+
+	systable_endscan(scan);
 
 	return result;
 }
@@ -1075,7 +1113,12 @@ shdepDropOwned(List *roleids, DropBehavior behavior)
 
 	deleteobjs = new_object_addresses();
 
-	sdepRel = heap_open(SharedDependRelationId, AccessExclusiveLock);
+	/*
+	 * We don't need this strong a lock here, but we'll call routines that
+	 * acquire RowExclusiveLock.  Better get that right now to avoid potential
+	 * deadlock failures.
+	 */
+	sdepRel = heap_open(SharedDependRelationId, RowExclusiveLock);
 
 	/*
 	 * For each role, find the dependent objects and drop them using the
@@ -1084,9 +1127,9 @@ shdepDropOwned(List *roleids, DropBehavior behavior)
 	foreach(cell, roleids)
 	{
 		Oid			roleid = lfirst_oid(cell);
+		ScanKeyData key[2];
+		SysScanDesc scan;
 		HeapTuple	tuple;
-		cqContext  *pcqCtx;
-		cqContext	cqc;
 
 		/* Doesn't work for pinned objects */
 		if (isSharedObjectPinned(AuthIdRelationId, roleid, sdepRel))
@@ -1104,24 +1147,31 @@ shdepDropOwned(List *roleids, DropBehavior behavior)
 						  getObjectDescription(&obj))));
 		}
 
-		pcqCtx = caql_beginscan(
-				caql_addrel(cqclr(&cqc), sdepRel),
-				cql("SELECT * FROM pg_shdepend "
-					" WHERE refclassid = :1 "
-					" AND refobjid = :2 "
-					" FOR UPDATE ",
-					ObjectIdGetDatum(AuthIdRelationId),
-					ObjectIdGetDatum(roleid)));
+		ScanKeyInit(&key[0],
+					Anum_pg_shdepend_refclassid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(AuthIdRelationId));
+		ScanKeyInit(&key[1],
+					Anum_pg_shdepend_refobjid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(roleid));
 
-		while (HeapTupleIsValid(tuple = caql_getnext(pcqCtx)))
+		scan = systable_beginscan(sdepRel, SharedDependReferenceIndexId, true,
+								  SnapshotNow, 2, key);
+
+		while ((tuple = systable_getnext(scan)) != NULL)
 		{
 			ObjectAddress obj;
 			GrantObjectType objtype;
 			InternalGrant istmt;
 			Form_pg_shdepend sdepForm = (Form_pg_shdepend) GETSTRUCT(tuple);
 
-			/* We only operate on objects in the current database */
-			if (sdepForm->dbid != MyDatabaseId)
+			/*
+			 * We only operate on shared objects and objects in the current
+			 * database
+			 */
+			if (sdepForm->dbid != MyDatabaseId &&
+				sdepForm->dbid != InvalidOid)
 				continue;
 
 			switch (sdepForm->deptype)
@@ -1172,22 +1222,25 @@ shdepDropOwned(List *roleids, DropBehavior behavior)
 					ExecGrantStmt_oids(&istmt);
 					break;
 				case SHARED_DEPENDENCY_OWNER:
-					/* Save it for deletion below */
-					obj.classId = sdepForm->classid;
-					obj.objectId = sdepForm->objid;
-					obj.objectSubId = 0;
-					add_exact_object_address(&obj, deleteobjs);
+					/* If a local object, save it for deletion below */
+					if (sdepForm->dbid == MyDatabaseId)
+					{
+						obj.classId = sdepForm->classid;
+						obj.objectId = sdepForm->objid;
+						obj.objectSubId = 0;
+						add_exact_object_address(&obj, deleteobjs);
+					}
 					break;
 			}
 		}
 
-		caql_endscan(pcqCtx);
+		systable_endscan(scan);
 	}
 
 	/* the dependency mechanism does the actual work */
 	performMultipleDeletions(deleteobjs, behavior);
 
-	heap_close(sdepRel, AccessExclusiveLock);
+	heap_close(sdepRel, RowExclusiveLock);
 
 	free_object_addresses(deleteobjs);
 }
@@ -1204,13 +1257,18 @@ shdepReassignOwned(List *roleids, Oid newrole)
 	Relation	sdepRel;
 	ListCell   *cell;
 
-	sdepRel = heap_open(SharedDependRelationId, AccessShareLock);
+	/*
+	 * We don't need this strong a lock here, but we'll call routines that
+	 * acquire RowExclusiveLock.  Better get that right now to avoid potential
+	 * deadlock problems.
+	 */
+	sdepRel = heap_open(SharedDependRelationId, RowExclusiveLock);
 
 	foreach(cell, roleids)
 	{
+		SysScanDesc scan;
+		ScanKeyData key[2];
 		HeapTuple	tuple;
-		cqContext  *pcqCtx;
-		cqContext	cqc;
 		Oid			roleid = lfirst_oid(cell);
 
 		/* Refuse to work on pinned roles */
@@ -1224,8 +1282,7 @@ shdepReassignOwned(List *roleids, Oid newrole)
 
 			ereport(ERROR,
 					(errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
-				   errmsg("cannot drop objects owned by %s because they are "
-						  "required by the database system",
+					 errmsg("cannot reassign ownership of objects owned by %s because they are required by the database system",
 						  getObjectDescription(&obj))));
 
 			/*
@@ -1234,15 +1291,19 @@ shdepReassignOwned(List *roleids, Oid newrole)
 			 */
 		}
 
-		pcqCtx = caql_beginscan(
-				caql_addrel(cqclr(&cqc), sdepRel),
-				cql("SELECT * FROM pg_shdepend "
-					" WHERE refclassid = :1 "
-					" AND refobjid = :2 ",
-					ObjectIdGetDatum(AuthIdRelationId),
-					ObjectIdGetDatum(roleid)));
+		ScanKeyInit(&key[0],
+					Anum_pg_shdepend_refclassid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(AuthIdRelationId));
+		ScanKeyInit(&key[1],
+					Anum_pg_shdepend_refobjid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(roleid));
 
-		while (HeapTupleIsValid(tuple = caql_getnext(pcqCtx)))
+		scan = systable_beginscan(sdepRel, SharedDependReferenceIndexId, true,
+								  SnapshotNow, 2, key);
+
+		while ((tuple = systable_getnext(scan)) != NULL)
 		{
 			Form_pg_shdepend sdepForm = (Form_pg_shdepend) GETSTRUCT(tuple);
 
@@ -1291,6 +1352,18 @@ shdepReassignOwned(List *roleids, Oid newrole)
 					AlterFunctionOwner_oid(sdepForm->objid, newrole);
 					break;
 
+				case LanguageRelationId:
+					AlterLanguageOwner_oid(sdepForm->objid, newrole);
+					break;
+
+				case OperatorClassRelationId:
+					AlterOpClassOwner_oid(sdepForm->objid, newrole);
+					break;
+
+				case OperatorFamilyRelationId:
+					AlterOpFamilyOwner_oid(sdepForm->objid, newrole);
+					break;
+
 				default:
 					elog(ERROR, "unexpected classid %d", sdepForm->classid);
 					break;
@@ -1299,8 +1372,8 @@ shdepReassignOwned(List *roleids, Oid newrole)
 			CommandCounterIncrement();
 		}
 
-		caql_endscan(pcqCtx);
+		systable_endscan(scan);
 	}
 
-	heap_close(sdepRel, AccessShareLock);
+	heap_close(sdepRel, RowExclusiveLock);
 }

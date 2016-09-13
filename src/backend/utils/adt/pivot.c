@@ -140,7 +140,7 @@ bool array_next(array_iter *iter, Datum *value, bool *isna)
 		*value = PointerGetDatum(iter->ptr);
 		iter->ptr += VARSIZE(iter->ptr);
 	}
-	iter->ptr = (char*) att_align(iter->ptr, iter->typalign);
+	iter->ptr = (char*) att_align_nominal(iter->ptr, iter->typalign);
 	iter->index++;
 	return true;
 }
@@ -187,7 +187,7 @@ static int pivot_find(ArrayType *labels, text *attr)
 		if (asize == lsize && !memcmp(attr, labelsp, lsize))
 			return i;  /* Found */
 		labelsp  = labelsp + lsize;
-		labelsp  = (char*) att_align(labelsp, typalign); 
+		labelsp  = (char*) att_align_nominal(labelsp, typalign);
 	}
 	return -1;  /* Not found */
 }
@@ -291,111 +291,4 @@ static Datum oid_pivot_accum(FunctionCallInfo fcinfo, Oid type)
 			Assert(false);
 	}
 	PG_RETURN_ARRAYTYPE_P(data);
-}
-
-
-
-/*
- * For unpivot to behave correctly it needs to be able to return multiple
- * columns of an anonymous type, which currently would generate the error:
- *  'function returning record called in context that cannot accept type record'
- * This should be fixable once we implement LATERAL and can then hopefully make
- * use of unpivot in a way that makes sense.
- *
- * In the meantime unnest can be used to mimic unpivot behavior via:
- *   SELECT unnest(ARRAY['label 1', 'label 2', ...]),
- *          unnest(ARRAY[1,2,...]);
- *
- */
-typedef struct {
-	array_iter label_iter;
-	array_iter data_iter;
-} unpivot_fctx;
-
-Datum 
-text_unpivot(PG_FUNCTION_ARGS)
-{
-	FuncCallContext      *funcctx;
-	unpivot_fctx         *fctx;
-	MemoryContext         oldcontext;
-	Datum                 d[2];
-	bool                  isna[2];
-
-	/* stuff done only on the first call of the function */
-	if (SRF_IS_FIRSTCALL())
-	{
-		TupleDesc  tupdesc;
-		ArrayType *labels;
-		ArrayType *data;
-		Oid        eltype1;
-		Oid        eltype2;
-
-		/* see if we were given an explicit step size */
-		if (PG_NARGS() != 2)
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("number of parameters != 2")));
-
-		/* 
-		 * Type check inputs:
-		 *    0: label text[]
-		 *    1: value anyarray
-		 */
-		eltype1 = get_fn_expr_argtype(fcinfo->flinfo, 0);
-		eltype2 = get_fn_expr_argtype(fcinfo->flinfo, 1);
-
-		if (!OidIsValid(eltype1))
-			elog(ERROR, "could not determine data type of input 'label'");
-		if (!OidIsValid(eltype2))
-			elog(ERROR, "could not determine data type of input 'value'");
-
-		/* Strict function, return null on null input */
-		if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
-			PG_RETURN_NULL();
-		
-		/* create a function context for cross-call persistence */
-		funcctx = SRF_FIRSTCALL_INIT();
-
-		/* switch to memory context appropriate for multiple function calls */
-		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-
-        /* Build a tuple descriptor for our result type */
-        if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("function returning record called in context "
-                            "that cannot accept type record")));
-		funcctx->tuple_desc = BlessTupleDesc(tupdesc);
-
-		/* allocate memory for user context */
-		fctx = (unpivot_fctx *) palloc(sizeof(unpivot_fctx));
-
-		/* Use fctx to keep state from call to call */
-		labels = PG_GETARG_ARRAYTYPE_P(0);
-		data   = PG_GETARG_ARRAYTYPE_P(1);
-		array_loop(labels, ARR_LBOUND(labels)[0], &fctx->label_iter);
-		array_loop(data,   ARR_LBOUND(labels)[0], &fctx->data_iter);		
-
-		funcctx->user_fctx = fctx;
-		MemoryContextSwitchTo(oldcontext);
-	}
-
-	/* stuff done on every call of the function */
-	funcctx = SRF_PERCALL_SETUP();
-
-	/* get the saved state and use current as the result for this iteration */
-	fctx = (unpivot_fctx*) funcctx->user_fctx;
-
-	if (array_next(&fctx->label_iter, &d[0], &isna[0]))
-	{
-		HeapTuple tuple;
-
-		array_next(&fctx->data_iter, &d[1], &isna[1]);
-		tuple = heap_form_tuple(funcctx->tuple_desc, d, isna);
-		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));		
-	}
-	else
-	{
-		SRF_RETURN_DONE(funcctx);
-	}
 }

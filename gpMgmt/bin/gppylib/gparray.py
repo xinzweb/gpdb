@@ -761,6 +761,18 @@ class Segment:
             if (prim_status, prim_mode, mirror_status, mirror_role) not in VALID_SEGMENT_STATES:
                 return False
         return True
+
+    def get_active_primary(self):
+        if self.primaryDB.isSegmentPrimary(current_role=True):
+            return self.primaryDB
+        else:
+            for mirror in self.mirrorDBs:
+                if mirror.isSegmentPrimary(current_role=True):
+                    return mirror
+
+    def get_primary_dbid(self):
+        return self.primaryDB.getSegmentDbId()
+
 # --------------------------------------------------------------------
 # --------------------------------------------------------------------
 class SegmentRow():
@@ -852,8 +864,7 @@ def createSegmentRows( hostlist
         return rows
     elif mirror_type.lower().strip() == 'spread':
         #TODO: must be sure to put mirrors on a different subnet than primary.
-        #      this is a general problem for GPDB these days. perhaps we should
-        #      add something to gpdetective to be able to detect this and fix it.
+        #      this is a general problem for GPDB these days.
         #      best to have the interface mapping stuff 1st.
         content=0
         isprimary='f'
@@ -1474,7 +1485,7 @@ class GpArray:
         if strategy_rows.rowcount == 0:
             raise Exception("Database does not contain gp_fault_strategy entry")
         if strategy_rows.rowcount > 1:
-            raise Exception("Database does too many gp_fault_strategy entries")
+            raise Exception("Database has too many gp_fault_strategy entries")
         strategy = strategy_rows.fetchone()[0]
 
         array = GpArray(segments, origSegments, strategy)
@@ -1494,7 +1505,7 @@ class GpArray:
         (called by gpexpand.)
 
         Note: Currently this is only used by the gpexpand rollback facility,
-        and by gpsuspend utility,
+        and by gpmigrator utility,
         there is currently NO expectation that this file format is saved
         on disk in any long term fashion.  
 
@@ -1723,6 +1734,14 @@ class GpArray:
                 dbs.extend(seg.get_dbs()) 
         return dbs
 
+    # --------------------------------------------------------------------
+    def getSegmentList(self, includeExpansionSegs=False):
+        """Return a list of all GpDb objects for all segments in the array"""
+        dbs=[]
+        dbs.extend(self.segments)
+        if includeExpansionSegs:
+            dbs.extend(self.expansionSegments)
+        return dbs
 
     # --------------------------------------------------------------------
     def getSegDbMap(self):
@@ -2245,6 +2264,7 @@ class GpArray:
         datadirs = {}
         used_ports = {}
         used_replication_ports = {}
+        hostname = ""
         for db in self.getDbList(True):
             datadir = db.getSegmentDataDirectory()
             hostname = db.getSegmentHostName()

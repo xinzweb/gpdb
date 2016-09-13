@@ -20,7 +20,7 @@ create table qp_misc_jiras.tbl1318(dummy integer, aa text not null);
 create index concurrently a_daa on qp_misc_jiras.tbl1318(dummy,aa);
 alter table qp_misc_jiras.tbl1318 alter column aa type integer using  bit_length(aa);
 drop index qp_misc_jiras.tbl1318_daa;
-alter table qp_misc_jiras.tbl1318 alter column aa type integer using  bit_length(aa);
+alter table qp_misc_jiras.tbl1318 alter column aa type integer using  bit_length(aa::text);
 drop table qp_misc_jiras.tbl1318;
 
 create table qp_misc_jiras.tbl1318(dummy integer, aa text not null);
@@ -487,16 +487,6 @@ select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_p1;
 select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_p2;
 select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_p3;
 
-create table qp_misc_jiras.tbl5028_delete_as_truncate (a int, b date,c text)
-partition by range(b)
-(
-        partition p1 start('2007-01-01'),
-        partition p2 start('2008-01-01'),
-        partition p3 start('2009-01-01'),
-        default partition def_part
-);
-insert into qp_misc_jiras.tbl5028_delete_as_truncate select * from qp_misc_jiras.tbl5028_part_test;
-
 DELETE FROM qp_misc_jiras.tbl5028_part_test where b >= '2007-01-01' and b <= '2007-03-01';
 
 select count(*) from qp_misc_jiras.tbl5028_part_test; -- should be 45
@@ -505,17 +495,6 @@ select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_def_part ; -- should 
 select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_p1; -- should be 9
 select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_p2; -- should be 12
 select count(*) from qp_misc_jiras.tbl5028_part_test_1_prt_p3; -- should be 12
-set gp_enable_delete_as_truncate=on;
-
-DELETE FROM qp_misc_jiras.tbl5028_delete_as_truncate where b >= '2007-01-01' and b <= '2007-03-01';
-
-select count(*) from qp_misc_jiras.tbl5028_delete_as_truncate; --should be 45
-select count(*) from qp_misc_jiras.tbl5028_delete_as_truncate_1_prt_def_part ; -- should be 12
-select count(*) from qp_misc_jiras.tbl5028_delete_as_truncate_1_prt_p1; -- should be 9
-select count(*) from qp_misc_jiras.tbl5028_delete_as_truncate_1_prt_p2; -- should be 12
-select count(*) from qp_misc_jiras.tbl5028_delete_as_truncate_1_prt_p3; -- should be 12
-
-drop table qp_misc_jiras.tbl5028_delete_as_truncate;
 drop table qp_misc_jiras.tbl5028_part_test;
 -- start_ignore
 --   MPP-11125: partition p1 start('0') end('25') every 8 (12)
@@ -847,8 +826,8 @@ END ('2009-06-30 00:00:00'::timestamp without time zone) EVERY ('1 day'::interva
 );
 
 insert into qp_misc_jiras.tbl6419_test values( 123, '2009-06-01', 12, '2009-06-01 01:01:01', 'aaaaaa');
-select * from qp_misc_jiras.tbl6419_test where icedt = (select partitionrangestart FROM pg_partitions where tablename='test1' and schemaname='public' and partitionrank=1);
-select * from qp_misc_jiras.tbl6419_test where '2009-12-12'::date = (select 'test'::text);
+select * from qp_misc_jiras.tbl6419_test where icedt::text = (select partitionrangestart FROM pg_partitions where tablename='test1' and schemaname='public' and partitionrank=1);
+select * from qp_misc_jiras.tbl6419_test where '2009-12-12'::date::text = (select 'test'::text);
 drop table qp_misc_jiras.tbl6419_test;
 
 -- start_matchsubs
@@ -1073,7 +1052,7 @@ WHERE T.SQ = 1
 
 drop table qp_misc_jiras.ins_cr_nds_dt, qp_misc_jiras.ins_cr_nds_mstr, qp_misc_jiras.m_ccr_cvr_nds_t99, qp_misc_jiras.m_ccr_mthy_cr_nds_t00;
 
-reset gp_select_invisible;
+set gp_select_invisible=false;
 
 create table qp_misc_jiras.tbl6448 (x "char");
 insert into qp_misc_jiras.tbl6448 values ('a');
@@ -2341,19 +2320,6 @@ insert into qp_misc_jiras.tbl9706aoc select i from generate_series(1, 100) i;
 
 select * from pg_catalog.get_ao_distribution('qp_misc_jiras.tbl9706ao'::regclass) order by 1 limit 2;
 select * from pg_catalog.get_ao_distribution('qp_misc_jiras.tbl9706aoc'::regclass) order by 1 limit 2;
-create table qp_misc_jiras.test_1 (a int, b int, c int) with (appendonly=true, orientation=column,compresslevel=0,blocksize=32768,checksum=false);
-insert into qp_misc_jiras.test_1 values (1,1,2);
-insert into qp_misc_jiras.test_1 values (1,1,3);
-insert into qp_misc_jiras.test_1 values (1,1,4);
-select count(*) from qp_misc_jiras.test_1;
-set Debug_column_store_use_new_segment_filename_format=on;
-select count(*) from qp_misc_jiras.test_1;
-set Debug_column_store_use_new_segment_filename_format=off;
-alter table qp_misc_jiras.test_1 set distributed by (c);
-set Debug_column_store_use_new_segment_filename_format=off;
-set Debug_column_store_use_new_segment_filename_format=on;
-select count(*) from qp_misc_jiras.test_1;
-drop table qp_misc_jiras.test_1;
 create table qp_misc_jiras.bmap2 (a varchar, b varchar);
 insert into qp_misc_jiras.bmap2 values ('1', NULL);
 create index bmap2_index on qp_misc_jiras.bmap2 using bitmap (a, b);

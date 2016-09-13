@@ -10,6 +10,7 @@
 #include "postgres.h"
 
 #include "cdb/cdbpartition.h"
+#include "cdb/partitionselection.h"
 #include "executor/execDynamicIndexScan.h"
 #include "executor/execDynamicScan.h"
 #include "executor/nodeIndexscan.h"
@@ -117,6 +118,7 @@ static Oid
 IndexScan_GetIndexOid(IndexScanState *indexScanState, Oid tableOid)
 {
 	IndexScan *indexScan = (IndexScan *) indexScanState->ss.ps.plan;
+	Relation partRel;
 
 	/*
 	 * We return the plan node's indexid for non-partitioned case.
@@ -139,7 +141,11 @@ IndexScan_GetIndexOid(IndexScanState *indexScanState, Oid tableOid)
 	 * We started at table level, and now we are fetching the oid of an index
 	 * partition.
 	 */
-	Oid indexOid = getPhysicalIndexRelid(indexScan->logicalIndexInfo, tableOid);
+	Oid indexOid;
+
+	partRel = OpenScanRelationByOid(tableOid);
+	indexOid = getPhysicalIndexRelid(partRel, indexScan->logicalIndexInfo);
+	CloseScanRelation(partRel);
 
 	Assert(OidIsValid(indexOid));
 
@@ -728,7 +734,6 @@ IndexScan_EndIndexScan(IndexScanState *indexScanState)
 	Assert(NULL == indexScanState->iss_RelationDesc);
 	Assert(NULL == indexScanState->iss_ScanDesc);
 
-	Assert(NULL != indexScanState->iss_RuntimeContext);
 	FreeRuntimeKeysContext(indexScanState);
 	Assert(NULL == indexScanState->iss_RuntimeContext);
 

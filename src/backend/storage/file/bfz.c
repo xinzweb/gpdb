@@ -41,12 +41,6 @@ static const struct{
 
 static bfz_t *bfz_create_internal(bfz_t * bfz_handle, const char *fileName, bool open_existing, bool delOnClose, int compress);
 
-const char *
-bfz_compression_to_string(int compress)
-{
-	return compression_algorithms[compress].name[0];
-}
-
 int
 bfz_string_to_compression(const char *string)
 {
@@ -60,10 +54,22 @@ bfz_string_to_compression(const char *string)
 	return -1;
 }
 
+/*
+ * bfz_close_callback
+ *		Callback for register for transaction end cleanups
+ *
+ * If the callback is called during transaction abort we want to avoid throwing
+ * another ereport().
+ */
 static void
 bfz_close_callback(XactEvent event, void *arg)
 {
-	bfz_close(arg, false);
+	bool unlink_error = true;
+
+	if (event == XACT_EVENT_ABORT)
+		unlink_error = false;
+
+	bfz_close(arg, false, unlink_error);
 }
 
 #define BFZ_CHECKSUM_EQ(c1, c2) EQ_CRC32C(c1, c2)
@@ -91,7 +97,11 @@ compute_checksum(const char *buffer, uint32 size)
 		currSectorBegin += BFZ_CHECKSUM_SECTOR_SIZE;
 	}
 
-	FIN_CRC32C(crc);
+	/*
+	 * By historical accident, the checksum calculated here
+	 * is *not* inverted, like CRC-32C checksums usually are.
+	 */
+	/* FIN_CRC32C(crc); */
 
 	return crc;
 }
@@ -413,8 +423,19 @@ bfz_create_internal(bfz_t *bfz_handle, const char *fileName, bool open_existing,
 	return bfz_handle;
 }
 
+/*
+ * bfz_close
+ *		Close and free used resources
+ *
+ * When unreg is set to true the callback for removing the file during end of
+ * transaction will be removed to avoid attempting to delete a removed file.
+ * If the file is missing and can't be deleted an error will be thrown, this
+ * can be avoided by setting error_on_unlink to false when running bfz_close()
+ * as part of a transaction abortion for example were throwing additional
+ * errors should be avoided.
+ */
 void
-bfz_close(bfz_t * thiz, bool unreg)
+bfz_close(bfz_t * thiz, bool unreg, bool error_on_unlink)
 {
 	if (unreg)
 		UnregisterXactCallbackOnce(bfz_close_callback, thiz);
@@ -437,7 +458,7 @@ bfz_close(bfz_t * thiz, bool unreg)
 	if (thiz->del_on_close && thiz->filename != NULL)
 	{
 		if (unlink(thiz->filename))
-			ereport(ERROR,
+			ereport((error_on_unlink ? ERROR : WARNING),
 					(errcode(ERRCODE_IO_ERROR),
 					errmsg("could not close temporary file %s: %m", thiz->filename)));
 		pfree(thiz->filename);

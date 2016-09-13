@@ -8,14 +8,13 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/rewrite/rewriteSupport.c,v 1.64 2007/01/05 22:19:37 momjian Exp $
+ *	  $PostgreSQL: pgsql/src/backend/rewrite/rewriteSupport.c,v 1.65 2008/01/01 19:45:51 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
 
 #include "access/heapam.h"
-#include "catalog/catquery.h"
 #include "catalog/indexing.h"
 #include "rewrite/rewriteSupport.h"
 #include "utils/inval.h"
@@ -42,23 +41,14 @@ SetRelationRuleStatus(Oid relationId, bool relHasRules,
 	Relation	relationRelation;
 	HeapTuple	tuple;
 	Form_pg_class classForm;
-	cqContext	cqc;
-	cqContext  *pcqCtx;
 
 	/*
 	 * Find the tuple to update in pg_class, using syscache for the lookup.
 	 */
 	relationRelation = heap_open(RelationRelationId, RowExclusiveLock);
-
-	pcqCtx = caql_addrel(cqclr(&cqc), relationRelation);
-
-	tuple = caql_getfirst(
-			pcqCtx,
-			cql("SELECT * FROM pg_class "
-				" WHERE oid = :1 "
-				" FOR UPDATE ",
-				ObjectIdGetDatum(relationId)));
-
+	tuple = SearchSysCacheCopy(RELOID,
+							   ObjectIdGetDatum(relationId),
+							   0, 0, 0);
 	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for relation %u", relationId);
 	classForm = (Form_pg_class) GETSTRUCT(tuple);
@@ -74,7 +64,10 @@ SetRelationRuleStatus(Oid relationId, bool relHasRules,
 			classForm->relstorage = RELSTORAGE_VIRTUAL;
 		}
 
-		caql_update_current(pcqCtx, tuple); /* implicit update of index  */
+		simple_heap_update(relationRelation, &tuple->t_self, tuple);
+
+		/* Keep the catalog indexes up to date */
+		CatalogUpdateIndexes(relationRelation, tuple);
 	}
 	else
 	{

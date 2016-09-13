@@ -41,6 +41,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
@@ -586,7 +587,7 @@ class CodegenUtilsTest : public ::testing::Test {
     // Check the correctness of the scalar element type
     ASSERT_NE(llvm_type, nullptr);
     check_functor(llvm_type);
-  };
+  }
 
   // Helper method for GetArrayTypeTest. Calls CodegenUtils::GetType() for
   // one, two and three dimensional arrays of 'ElementType', calling
@@ -614,7 +615,8 @@ class CodegenUtilsTest : public ::testing::Test {
       EXPECT_TRUE(llvm_type->isIntegerTy(sizeof(IntegerType) << 3));
     };
 
-    CheckForVariousArrayDimensions<IntegerType, decltype(integer_check_lambda)>(integer_check_lambda);
+    CheckForVariousArrayDimensions<IntegerType,
+        decltype(integer_check_lambda)>(integer_check_lambda);
   }
 
   // Helper method for GetArrayTypeTest. Tests arrays of various flavors
@@ -622,16 +624,16 @@ class CodegenUtilsTest : public ::testing::Test {
   template <typename PointedType, typename ScalarCheckFunctor>
   void CheckGetArrayOfPointersType(ScalarCheckFunctor check_functor) {
     // Pointer flavors
-    CheckForVariousArrayDimensions<PointedType*, decltype(check_functor)>(
-        check_functor);
-    CheckForVariousArrayDimensions<PointedType* const, decltype(check_functor)>(
-        check_functor);
-    CheckForVariousArrayDimensions<const PointedType*, decltype(check_functor)>(
-        check_functor);
-    CheckForVariousArrayDimensions<const PointedType* const, decltype(check_functor)>(
-        check_functor);
+    CheckForVariousArrayDimensions<PointedType*,
+        decltype(check_functor)>(check_functor);
+    CheckForVariousArrayDimensions<PointedType* const,
+        decltype(check_functor)>(check_functor);
+    CheckForVariousArrayDimensions<const PointedType*,
+        decltype(check_functor)>(check_functor);
+    CheckForVariousArrayDimensions<const PointedType* const,
+        decltype(check_functor)>(check_functor);
 
-    // TODO Add checks for annotated types here
+    // TODO(shardikar) Add checks for annotated types here
   }
 
   // Helper method for GetArrayTypeTest. Tests various different flavors of an
@@ -648,7 +650,8 @@ class CodegenUtilsTest : public ::testing::Test {
       EXPECT_EQ(llvm_type, int_llvm_type);
     };
 
-    CheckForVariousArrayDimensions<EnumType, decltype(enum_check_lambda)>(enum_check_lambda);
+    CheckForVariousArrayDimensions<EnumType,
+        decltype(enum_check_lambda)>(enum_check_lambda);
   }
 
   // Helper method for GetScalarConstantTest. Tests
@@ -656,24 +659,31 @@ class CodegenUtilsTest : public ::testing::Test {
   template <typename IntegerType>
   void CheckGetSingleIntegerConstant(const IntegerType integer_constant) {
     llvm::Constant* constant = codegen_utils_->GetConstant(integer_constant);
-
-    // Check the type.
-    EXPECT_EQ(codegen_utils_->GetType<IntegerType>(), constant->getType());
-
-    // Check the value.
-    const llvm::APInt& constant_apint = constant->getUniqueInteger();
-    if (std::is_signed<IntegerType>::value) {
-      // If signed, compare with the APInt's sign-extended representation.
-      EXPECT_TRUE(constant_apint.isSignedIntN(sizeof(IntegerType) << 3));
-      EXPECT_EQ(integer_constant,
-                static_cast<IntegerType>(constant_apint.getSExtValue()));
-    } else {
-      // If unsigned, compare with the APInt's zero-extended representation.
-      EXPECT_TRUE(constant_apint.isIntN(sizeof(IntegerType) << 3));
-      EXPECT_EQ(integer_constant,
-                static_cast<IntegerType>(constant_apint.getZExtValue()));
-    }
+    CheckGetSingleIntegerConstant(integer_constant, constant);
   }
+
+  // Helper method for GetScalarConstantTest. Tests
+  // CodegenUtils::GetConstant() for a single 'integer_constant'.
+  template <typename IntegerType>
+  void CheckGetSingleIntegerConstant(const IntegerType integer_constant,
+                                     llvm::Constant* constant) {
+      // Check the type.
+      EXPECT_EQ(codegen_utils_->GetType<IntegerType>(), constant->getType());
+
+      // Check the value.
+      const llvm::APInt& constant_apint = constant->getUniqueInteger();
+      if (std::is_signed<IntegerType>::value) {
+        // If signed, compare with the APInt's sign-extended representation.
+        EXPECT_TRUE(constant_apint.isSignedIntN(sizeof(IntegerType) << 3));
+        EXPECT_EQ(integer_constant,
+                  static_cast<IntegerType>(constant_apint.getSExtValue()));
+      } else {
+        // If unsigned, compare with the APInt's zero-extended representation.
+        EXPECT_TRUE(constant_apint.isIntN(sizeof(IntegerType) << 3));
+        EXPECT_EQ(integer_constant,
+                  static_cast<IntegerType>(constant_apint.getZExtValue()));
+      }
+    }
 
   // Helper method for GetScalarConstantTest. Tests
   // CodegenUtils::GetConstant() for an 'IntegerType' with several values
@@ -694,33 +704,77 @@ class CodegenUtilsTest : public ::testing::Test {
     }
   }
 
+  // Helper method for CreateCastTest. Test CreateCast
+  // for Integer types
+  template <typename IntegerDestType, typename IntegerSrcType>
+  void CheckIntegerCast(const IntegerDestType integer_constant) {
+    llvm::Constant* constant = codegen_utils_->GetConstant<IntegerSrcType>(
+        static_cast<IntegerSrcType>(integer_constant));
+    llvm::Constant* casted_constant =
+        llvm::dyn_cast<llvm::Constant>(
+            codegen_utils_->CreateCast<IntegerDestType, IntegerSrcType>(
+                constant));
+    CheckGetSingleIntegerConstant(integer_constant, casted_constant);
+  }
+
+  // Helper method for CreateCastTest. Tests
+  // CodegenUtils::CreateCast() for an 'IntegerType' with several values
+  // of the specified integer type (0, 1, 123, the maximum, and if signed,
+  // -1, -123, and the minimum).
+  template <typename IntegerDestType, typename IntegerSrcType>
+    void CheckIntegerCast() {
+    CheckIntegerCast<IntegerDestType, IntegerSrcType>(0);
+    CheckIntegerCast<IntegerDestType, IntegerSrcType>(1);
+    CheckIntegerCast<IntegerDestType, IntegerSrcType>(123);
+    CheckIntegerCast<IntegerDestType, IntegerSrcType>(
+          static_cast<IntegerDestType>(
+              std::numeric_limits<IntegerSrcType>::max()));
+      if (std::is_signed<IntegerDestType>::value ||
+          std::is_signed<IntegerSrcType>::value) {
+        IntegerSrcType src_value = -1;
+        CheckIntegerCast<IntegerDestType, IntegerSrcType>(
+            static_cast<IntegerDestType>(src_value));
+        src_value = -123;
+        CheckIntegerCast<IntegerDestType, IntegerSrcType>(
+            static_cast<IntegerDestType>(src_value));
+        src_value = std::numeric_limits<IntegerSrcType>::min();
+        CheckIntegerCast<IntegerDestType, IntegerSrcType>(
+            static_cast<IntegerDestType>(src_value));
+      }
+    }
+
   // Helper method for GetScalarConstantTest. Tests
   // CodegenUtils::GetConstant() for a single 'fp_constant'.
   template <typename FloatingPointType>
   void CheckGetSingleFloatingPointConstant(
       const FloatingPointType fp_constant) {
     llvm::Constant* constant = codegen_utils_->GetConstant(fp_constant);
-
-    // Check the type.
-    EXPECT_EQ(codegen_utils_->GetType<FloatingPointType>(),
-              constant->getType());
-
-    // Check the value.
-    llvm::ConstantFP* constant_as_fp
-        = llvm::dyn_cast<llvm::ConstantFP>(constant);
-    ASSERT_NE(constant_as_fp, nullptr);
-    if (std::is_same<double, FloatingPointType>::value) {
-      EXPECT_EQ(fp_constant,
-                constant_as_fp->getValueAPF().convertToDouble());
-    } else if (std::is_same<float, FloatingPointType>::value) {
-      EXPECT_EQ(fp_constant,
-                constant_as_fp->getValueAPF().convertToFloat());
-    } else {
-      ASSERT_TRUE(false)
-          << "Can not check value of floating point constant for a type that "
-          << "is not float or double.";
-    }
+    CheckGetSingleFloatingPointConstant(fp_constant, constant);
   }
+
+  template <typename FloatingPointType>
+    void CheckGetSingleFloatingPointConstant(
+        const FloatingPointType fp_constant,
+        llvm::Constant* constant) {      // Check the type.
+      EXPECT_EQ(codegen_utils_->GetType<FloatingPointType>(),
+                constant->getType());
+
+      // Check the value.
+      llvm::ConstantFP* constant_as_fp
+          = llvm::dyn_cast<llvm::ConstantFP>(constant);
+      ASSERT_NE(constant_as_fp, nullptr);
+      if (std::is_same<double, FloatingPointType>::value) {
+        EXPECT_EQ(fp_constant,
+                  constant_as_fp->getValueAPF().convertToDouble());
+      } else if (std::is_same<float, FloatingPointType>::value) {
+        EXPECT_EQ(fp_constant,
+                  constant_as_fp->getValueAPF().convertToFloat());
+      } else {
+        ASSERT_TRUE(false)
+            << "Can not check value of floating point constant for a type that "
+            << "is not float or double.";
+      }
+    }
 
   // Helper method for GetScalarConstantTest. Tests
   // CodegenUtils::GetConstant() for a 'FloatingPointType' with several values
@@ -744,6 +798,38 @@ class CodegenUtilsTest : public ::testing::Test {
         std::numeric_limits<FloatingPointType>::denorm_min());
     CheckGetSingleFloatingPointConstant(
         std::numeric_limits<FloatingPointType>::infinity());
+  }
+
+  // Helper method for CreateCastTest. Test CreateCast
+  // for Floating Point types
+  template <typename FloatDestType, typename FloatSrcType>
+  void CheckFloatingPointCast(const FloatDestType fp_constant) {
+    llvm::Constant* constant = codegen_utils_->GetConstant<FloatSrcType>(
+        static_cast<FloatSrcType>(fp_constant));
+    llvm::Constant* casted_constant =
+        llvm::dyn_cast<llvm::Constant>(
+            codegen_utils_->CreateCast<FloatDestType, FloatSrcType>(constant));
+    CheckGetSingleFloatingPointConstant(fp_constant, casted_constant);
+  }
+
+  // Helper method for CreateCastTest. Tests
+  // CodegenUtils::CreateCast() for a 'FloatSrcType' with several values
+  // of the specified floating point type (positive and negative zero, positive
+  // and negative 12.34, the minimum and maximum possible normalized values,
+  // the highest-magnitude negative value, the smallest possible nonzero
+  // denormalized value, and infinity).
+  template <typename FloatDestType, typename FloatSrcType>
+  void CheckFloatingPointCast() {
+    std::vector<FloatSrcType> src_values = {0.0, -0.0, 12.34, -12.34,
+        std::numeric_limits<FloatSrcType>::min(),
+        std::numeric_limits<FloatSrcType>::max(),
+        std::numeric_limits<FloatSrcType>::lowest(),
+        std::numeric_limits<FloatSrcType>::denorm_min(),
+        std::numeric_limits<FloatSrcType>::infinity()};
+    for (const FloatSrcType& src_value : src_values) {
+      CheckFloatingPointCast<FloatDestType, FloatSrcType>(
+          static_cast<FloatDestType>(src_value));
+    }
   }
 
   // Helper method for GetScalarConstantTest. Tests
@@ -905,7 +991,7 @@ class CodegenUtilsTest : public ::testing::Test {
     // Register 'external_function' in 'codegen_utils_' and check that it has
     // the expected type-signature.
     llvm::Function* llvm_external_function
-        = codegen_utils_->RegisterExternalFunction(external_function);
+        = codegen_utils_->GetOrRegisterExternalFunction(external_function);
     ASSERT_NE(llvm_external_function, nullptr);
     EXPECT_EQ(
         (codegen_utils_->GetFunctionType<ReturnType, ArgumentTypes...>()
@@ -1035,7 +1121,8 @@ class CodegenUtilsTest : public ::testing::Test {
   void MakeStructArrayMemberElementAccessorFunction(
       const std::string& function_name,
       PointerToMemberTypes&&... pointers_to_members) {
-    typedef typename std::remove_extent<OneDimArrayMemberType>::type ElementType;
+    typedef typename std::remove_extent<
+        OneDimArrayMemberType>::type ElementType;
     typedef ElementType (*AccessorFn) (const StructType*, size_t index);
     llvm::Function* accessor_function
         = codegen_utils_->CreateFunction<AccessorFn>(
@@ -1051,8 +1138,9 @@ class CodegenUtilsTest : public ::testing::Test {
         std::forward<PointerToMemberTypes>(pointers_to_members)...);
     // Get pointer to the index in that array
     llvm::Value* element_ptr = codegen_utils_->ir_builder()->CreateGEP(
-        array_member_ptr,
-        { codegen_utils_->GetConstant(0), ArgumentByPosition(accessor_function, 1) });
+        array_member_ptr, {
+          codegen_utils_->GetConstant(0),
+          ArgumentByPosition(accessor_function, 1) });
     // Actually load the value from the pointer.
     llvm::Value* element_value
         = codegen_utils_->ir_builder()->CreateLoad(element_ptr);
@@ -1072,7 +1160,7 @@ class CodegenUtilsTest : public ::testing::Test {
      InputType* input = new InputType[input_size];
      for (size_t idx = 0; idx < input_size; ++idx) {
          unsigned int seed = idx;
-         input[idx] = rand_r(&seed) % (2 ^ (sizeof(InputType) * 8) - 1);
+         input[idx] = rand_r(&seed) % ((2 ^ (sizeof(InputType) * 8)) - 1);
      }
      return input;
   }
@@ -1567,8 +1655,9 @@ TEST_F(CodegenUtilsTest, GetArrayTypeTest) {
   };
   // Unlike other types, we check only pointers, not references, because there
   // is no such thing as void&.
-  CheckForVariousArrayDimensions<void*, decltype(void_pointer_array_check_lambda)>(
-      void_pointer_array_check_lambda);
+  CheckForVariousArrayDimensions<void*,
+      decltype(void_pointer_array_check_lambda)>(
+          void_pointer_array_check_lambda);
 
   // Check bool* (bool is represented as i1 in LLVM IR).
   auto bool_pointer_array_check_lambda = [](const llvm::Type* llvm_type) {
@@ -1580,6 +1669,16 @@ TEST_F(CodegenUtilsTest, GetArrayTypeTest) {
       bool*,
       decltype(bool_pointer_array_check_lambda)>(
           bool_pointer_array_check_lambda);
+
+  // Check bool
+  auto bool_array_check_lambda = [](const llvm::Type* llvm_type) {
+    ASSERT_NE(llvm_type, nullptr);
+    EXPECT_TRUE(llvm_type->isIntegerTy(1));
+  };
+  CheckForVariousArrayDimensions<
+      bool,
+      decltype(bool_array_check_lambda)>(
+          bool_array_check_lambda);
 
   // Check float.
   auto float_array_check_lambda = [](const llvm::Type* llvm_type) {
@@ -1643,7 +1742,8 @@ TEST_F(CodegenUtilsTest, GetArrayTypeTest) {
   auto int_pointer_check_lambda = [](const llvm::Type* llvm_type) {
     ASSERT_NE(llvm_type, nullptr);
     EXPECT_TRUE(llvm_type->isPointerTy());
-    EXPECT_TRUE(llvm_type->getPointerElementType()->isIntegerTy(sizeof(int) << 3));
+    EXPECT_TRUE(llvm_type->getPointerElementType()->
+        isIntegerTy(sizeof(int) << 3));
   };
   CheckGetArrayOfPointersType<int>(int_pointer_check_lambda);
 
@@ -1668,7 +1768,8 @@ TEST_F(CodegenUtilsTest, GetArrayTypeTest) {
     EXPECT_TRUE(llvm_type->getPointerElementType()->
         getArrayElementType()->isIntegerTy(sizeof(int) << 3));
   };
-  int_pointer_to_array_of_ints_check_lambda(codegen_utils_->GetType<int (*) [5]>());
+  int_pointer_to_array_of_ints_check_lambda(
+      codegen_utils_->GetType<int(*) [5]>());
 }
 
 TEST_F(CodegenUtilsTest, GetScalarConstantTest) {
@@ -1754,6 +1855,37 @@ TEST_F(CodegenUtilsTest, GetScalarConstantTest) {
   CheckGetEnumConstants<StronglyTypedEnumUint64>(
       {StronglyTypedEnumUint64::kCaseA, StronglyTypedEnumUint64::kCaseB,
        StronglyTypedEnumUint64::kCaseC});
+}
+
+TEST_F(CodegenUtilsTest, CreateCastTest) {
+  // Check different integer types
+  // signed to signed with ext / trunc
+  CheckIntegerCast<std::int16_t, std::int8_t>();
+  CheckIntegerCast<std::int8_t, std::int16_t>();
+
+  // unsigned to unsigned with ext / trunc
+  CheckIntegerCast<std::uint16_t, std::uint8_t>();
+  CheckIntegerCast<std::uint8_t, std::uint16_t>();
+
+  // signed to unsigned with ext / trunc
+  CheckIntegerCast<std::uint16_t, std::int8_t>();
+  CheckIntegerCast<std::uint8_t, std::int16_t>();
+
+  // unsigned to signed with ext / trunc
+  CheckIntegerCast<std::int16_t, std::uint8_t>();
+  CheckIntegerCast<std::int8_t, std::uint16_t>();
+
+  // integer type of same size
+  CheckIntegerCast<std::int8_t, std::int8_t>();
+  CheckIntegerCast<std::uint8_t, std::uint8_t>();
+
+  // Check floating-point types.
+  CheckFloatingPointCast<float, double>();
+  CheckFloatingPointCast<double, float>();
+
+  // Floating type of same size
+  CheckFloatingPointCast<float, float>();
+  CheckFloatingPointCast<double, double>();
 }
 
 TEST_F(CodegenUtilsTest, GetPointerConstantTest) {
@@ -2025,18 +2157,18 @@ TEST_F(CodegenUtilsTest, VariadicExternalFunctionTest) {
 
   // Register printf with takes variable arguments past char*
   llvm::Function* llvm_printf_function =
-      codegen_utils_->RegisterExternalFunction(printf);
+      codegen_utils_->GetOrRegisterExternalFunction(printf);
   ASSERT_NE(llvm_printf_function, nullptr);
-  ASSERT_EQ(
-      (codegen_utils_->GetFunctionType<int, char*>(true)->getPointerTo()),
+  ASSERT_EQ((codegen_utils_->
+        GetFunctionType<int, char*>(true)->getPointerTo()),
       llvm_printf_function->getType());
 
   // Register sprintf with takes variable arguments past char*, char*
   llvm::Function* llvm_sprintf_function =
-      codegen_utils_->RegisterExternalFunction(sprintf);
+      codegen_utils_->GetOrRegisterExternalFunction(sprintf);
   ASSERT_NE(llvm_sprintf_function, nullptr);
-  ASSERT_EQ(
-      (codegen_utils_->GetFunctionType<int, char*, char*>(true)->getPointerTo()),
+  ASSERT_EQ((codegen_utils_->
+        GetFunctionType<int, char*, char*>(true)->getPointerTo()),
       llvm_sprintf_function->getType());
 
   char sprintf_with_three_args_buffer[16], sprintf_with_four_args_buffer[16];
@@ -2047,7 +2179,7 @@ TEST_F(CodegenUtilsTest, VariadicExternalFunctionTest) {
   llvm::Function* sprintf_test =
       codegen_utils_->CreateFunction<SprintfTestType>("sprintf_test");
   llvm::BasicBlock* main_block =
-      codegen_utils_->CreateBasicBlock( "main", sprintf_test);
+      codegen_utils_->CreateBasicBlock("main", sprintf_test);
 
   codegen_utils_->ir_builder()->SetInsertPoint(main_block);
   codegen_utils_->ir_builder()->CreateCall(
@@ -2517,11 +2649,9 @@ TEST_F(CodegenUtilsTest, GetPointerToMemberTest) {
   MakeStructArrayMemberElementAccessorFunction<DummyStruct, int[5]>(
       "Get_DummyStruct::int_array_field",
       &DummyStruct::int_array_field);
-  // Special case for a boolean array
-  MakeStructArrayMemberElementAccessorFunction<DummyStruct, char[5]>(
+  MakeStructArrayMemberElementAccessorFunction<DummyStruct, bool[5]>(
       "Get_DummyStruct::bool_array_field",
-      reinterpret_cast<char (DummyStruct::*) [5]> (
-        &DummyStruct::bool_array_field));
+        &DummyStruct::bool_array_field);
 
   // Check that module is well-formed, then compile.
   EXPECT_FALSE(llvm::verifyModule(*codegen_utils_->module()));
@@ -2546,15 +2676,14 @@ TEST_F(CodegenUtilsTest, GetPointerToMemberTest) {
 
   int (*Get_DummyStruct_int_array_field)(const DummyStruct*, size_t index)
       = codegen_utils_->GetFunctionPointer<
-      decltype(Get_DummyStruct_int_array_field)>("Get_DummyStruct::int_array_field");
+      decltype(Get_DummyStruct_int_array_field)>(
+          "Get_DummyStruct::int_array_field");
   ASSERT_NE(Get_DummyStruct_int_array_field, nullptr);
 
-  // Although LLVM uses i1 to represent a boolean value, regard an array of bools
-  // as equivalent to an array of chars to preserve the size from C++ and make
-  // offset calculations using GEP easy.
-  char (*Get_DummyStruct_bool_array_field)(const DummyStruct*, size_t index)
+  bool (*Get_DummyStruct_bool_array_field)(const DummyStruct*, size_t index)
       = codegen_utils_->GetFunctionPointer<
-      decltype(Get_DummyStruct_bool_array_field)>("Get_DummyStruct::bool_array_field");
+      decltype(Get_DummyStruct_bool_array_field)>(
+          "Get_DummyStruct::bool_array_field");
   ASSERT_NE(Get_DummyStruct_bool_array_field, nullptr);
 
   // Call generated accessor function and make sure they read values from the
@@ -2653,16 +2782,16 @@ TEST_F(CodegenUtilsTest, OptimizationTest) {
 TEST_F(CodegenUtilsTest, CppClassObjectTest) {
   // Register method wrappers for Accumulator<double>
   llvm::Function* new_accumulator_double
-      = codegen_utils_->RegisterExternalFunction(
+      = codegen_utils_->GetOrRegisterExternalFunction(
           &WrapNew<Accumulator<double>, double>);
   llvm::Function* delete_accumulator_double
-      = codegen_utils_->RegisterExternalFunction(
+      = codegen_utils_->GetOrRegisterExternalFunction(
           &WrapDelete<Accumulator<double>>);
   llvm::Function* accumulator_double_accumulate
-      = codegen_utils_->RegisterExternalFunction(
+      = codegen_utils_->GetOrRegisterExternalFunction(
           &GPCODEGEN_WRAP_METHOD(&Accumulator<double>::Accumulate));
   llvm::Function* accumulator_double_get
-      = codegen_utils_->RegisterExternalFunction(
+      = codegen_utils_->GetOrRegisterExternalFunction(
           &GPCODEGEN_WRAP_METHOD(&Accumulator<double>::Get));
 
   typedef double (*AccumulateTestFn) (double);
@@ -2722,8 +2851,87 @@ TEST_F(CodegenUtilsTest, CppClassObjectTest) {
   EXPECT_EQ(-12.75, (*accumulate_test_fn_compiled)(-22.75));
 }
 
+// Test GetOrRegisterExternalFunction to return the right llvm::Function if
+// previously registered or else register it anew
+TEST_F(CodegenUtilsTest, GetOrRegisterExternalFunctionTest) {
+  // Test previous unregistered function
+  EXPECT_EQ(nullptr, codegen_utils_->module()->getFunction("floor"));
+  llvm::Function* floor_func = codegen_utils_->GetOrRegisterExternalFunction(
+      floor, "floor");
+  EXPECT_EQ(floor_func, codegen_utils_->module()->getFunction("floor"));
 
-#ifdef GPCODEGEN_DEBUG
+  // Test previous registered Non vararg function
+  llvm::Function* expected_fabs_func = codegen_utils_->
+      GetOrRegisterExternalFunction(ceil);
+  llvm::Function* fabs_func = codegen_utils_->
+      GetOrRegisterExternalFunction(ceil);
+
+  EXPECT_EQ(expected_fabs_func, fabs_func);
+
+  // Test previously registered vararg function
+  llvm::Function* expected_fprintf_func = codegen_utils_->
+      GetOrRegisterExternalFunction(fprintf);
+  llvm::Function* fprintf_func = codegen_utils_->
+      GetOrRegisterExternalFunction(fprintf);
+
+  EXPECT_EQ(expected_fprintf_func, fprintf_func);
+}
+
+// Utility method to compute the number of calls in an llvm::Function*
+int GetLLVMFunctionCallCount(llvm::Function* F) {
+  return std::count_if(llvm::inst_begin(F), llvm::inst_end(F),
+      [] (llvm::Instruction& i)-> bool {
+            return (llvm::dyn_cast<llvm::CallInst>(&i));
+      });
+}
+
+// Test InlineFunction
+TEST_F(CodegenUtilsTest, InlineFunctionTest) {
+  auto irb = codegen_utils_->ir_builder();
+
+  typedef int (*AddConstToIntFn) (int);
+
+  // Create a simple adds 1 to a number and returns the new value
+  llvm::Function* add_one_fn =
+      codegen_utils_->CreateFunction<AddConstToIntFn>("add_one");
+  irb->SetInsertPoint(codegen_utils_->CreateBasicBlock("main", add_one_fn));
+  irb->CreateRet(irb->CreateAdd(ArgumentByPosition(add_one_fn, 0),
+                                codegen_utils_->GetConstant(1)));
+
+  // Create another simple function add_two which calls add_one twice
+  llvm::Function* add_two_fn =
+      codegen_utils_->CreateFunction<AddConstToIntFn>("add_two");
+  irb->SetInsertPoint(codegen_utils_->CreateBasicBlock("main", add_two_fn));
+  llvm::CallInst* first_call =
+      irb->CreateCall(add_one_fn, {ArgumentByPosition(add_two_fn, 0)});
+  llvm::CallInst* second_call = irb->CreateCall(add_one_fn, {first_call});
+  irb->CreateRet(second_call);
+
+
+  EXPECT_EQ(GetLLVMFunctionCallCount(add_two_fn), 2);
+
+  EXPECT_TRUE(codegen_utils_->InlineFunction(first_call));
+  EXPECT_EQ(GetLLVMFunctionCallCount(add_two_fn), 1);
+
+  EXPECT_FALSE(codegen_utils_->InlineFunction(first_call));
+
+  EXPECT_TRUE(codegen_utils_->InlineFunction(second_call));
+  EXPECT_EQ(GetLLVMFunctionCallCount(add_two_fn), 0);
+
+  // Compiled module
+  EXPECT_TRUE(codegen_utils_->PrepareForExecution(
+      CodegenUtils::OptimizationLevel::kNone, false));
+  AddConstToIntFn compiled_add_two_fn =
+      codegen_utils_->GetFunctionPointer<AddConstToIntFn>("add_two");
+
+  // Test normal functionality, even after inlining
+  EXPECT_TRUE(nullptr != compiled_add_two_fn);
+  EXPECT_EQ(compiled_add_two_fn(5), 7);
+  EXPECT_EQ(compiled_add_two_fn(-5), -3);
+}
+
+
+#ifdef CODEGEN_DEBUG
 
 TEST_F(CodegenUtilsDeathTest, WrongFunctionTypeTest) {
   // Create a function identical to the one in TrivialCompilationTest, but try
@@ -2746,7 +2954,7 @@ TEST_F(CodegenUtilsDeathTest, WrongFunctionTypeTest) {
 TEST_F(CodegenUtilsDeathTest, ModifyExternalFunctionTest) {
   // Register an external function, then try to add a BasicBlock to it.
   llvm::Function* external_function
-      = codegen_utils_->RegisterExternalFunction(&std::mktime);
+      = codegen_utils_->GetOrRegisterExternalFunction(&std::mktime);
 
   EXPECT_DEATH(codegen_utils_->CreateBasicBlock("body", external_function),
                "");
@@ -2785,7 +2993,7 @@ TEST_F(CodegenUtilsDeathTest, GetPointerToMemberFromWrongTypeBasePointerTest) {
                "");
 }
 
-#endif  // GPCODEGEN_DEBUG
+#endif  // CODEGEN_DEBUG
 
 }  // namespace gpcodegen
 

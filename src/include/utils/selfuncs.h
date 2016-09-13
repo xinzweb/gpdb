@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/utils/selfuncs.h,v 1.39 2007/01/22 20:00:40 tgl Exp $
+ * $PostgreSQL: pgsql/src/include/utils/selfuncs.h,v 1.43 2008/01/01 19:45:59 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -17,7 +17,6 @@
 
 #include "fmgr.h"
 #include "access/htup.h"
-#include "catalog/catquery.h"
 #include "nodes/relation.h"
 
 
@@ -69,7 +68,7 @@ typedef struct VariableStatData
 {
 	Node	   *var;			/* the Var or expression tree */
 	RelOptInfo *rel;			/* Relation, or NULL if not identifiable */
-	cqContext  *statscqCtx;		/* pg_statistic cqctx, or NULL if none */
+	HeapTuple	statsTuple;		/* pg_statistic tuple, or NULL if none */
 	/* NB: if statsTuple!=NULL, it must be freed when caller is done */
 	double		numdistinctFromPrimaryKey; /* this is the numdistinct as estimated from the primary key relation. If this is < 0, then it is ignored. */
 	Oid			vartype;		/* exposed type of expression */
@@ -79,9 +78,13 @@ typedef struct VariableStatData
 } VariableStatData;
 
 /* get the pg_statistic tuple, or NULL if none */
-#define getStatsTuple(vardata) \
-(((NULL != (vardata)) && (NULL != (vardata)->statscqCtx)) ?	\
- caql_get_current((vardata)->statscqCtx) : NULL)
+#define getStatsTuple(vardata) ((vardata)->statsTuple)
+
+#define ReleaseVariableStats(vardata)  \
+	do { \
+		if (HeapTupleIsValid((vardata).statsTuple)) \
+			ReleaseSysCache((vardata).statsTuple); \
+	} while(0)
 
 typedef enum
 {
@@ -99,7 +102,6 @@ typedef enum
 
 extern void examine_variable(PlannerInfo *root, Node *node, int varRelid,
 				 VariableStatData *vardata);
-extern void ReleaseVariableStats(VariableStatData vardata);
 extern bool get_restriction_variable(PlannerInfo *root, List *args,
 						 int varRelid,
 						 VariableStatData *vardata, Node **other,
@@ -119,7 +121,7 @@ extern double convert_timevalue_to_scalar(Datum value, Oid typid);
 extern Pattern_Prefix_Status pattern_fixed_prefix(Const *patt,
 					 Pattern_Type ptype,
 					 Const **prefix,
-					 Const **rest);
+					 Selectivity *rest_selec);
 extern Const *make_greater_string(const Const *str_const, FmgrInfo *ltproc);
 
 extern Datum eqsel(PG_FUNCTION_ARGS);
@@ -163,8 +165,8 @@ extern Selectivity rowcomparesel(PlannerInfo *root,
 
 extern void mergejoinscansel(PlannerInfo *root, Node *clause,
 				 Oid opfamily, int strategy, bool nulls_first,
-				 Selectivity *leftscan,
-				 Selectivity *rightscan);
+				 Selectivity *leftstart, Selectivity *leftend,
+				 Selectivity *rightstart, Selectivity *rightend);
 
 extern double estimate_num_groups(PlannerInfo *root, List *groupExprs,
 					double input_rows);

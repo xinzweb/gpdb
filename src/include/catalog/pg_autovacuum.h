@@ -6,7 +6,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_autovacuum.h,v 1.6 2007/01/05 22:19:52 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_autovacuum.h,v 1.8 2008/01/01 19:45:56 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -14,29 +14,6 @@
 #define PG_AUTOVACUUM_H
 
 #include "catalog/genbki.h"
-
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_autovacuum
-   with (oid=false, relid=1248)
-   (
-   vacrelid          oid, 
-   enabled           boolean, 
-   vac_base_thresh   integer, 
-   vac_scale_factor  real, 
-   anl_base_thresh   integer, 
-   anl_scale_factor  real, 
-   vac_cost_delay    integer, 
-   vac_cost_limit    integer, 
-   freeze_min_age    integer, 
-   freeze_max_age    integer
-   );
-
-   create unique index on pg_autovacuum(vacrelid) with (indexid=1250, CamelCase=AutovacuumRelid);
-
-   TIDYCAT_ENDFAKEDEF
-*/
-
 
 /* ----------------
  *		pg_autovacuum definition.	cpp turns this into
@@ -46,17 +23,20 @@
 #define AutovacuumRelationId	1248
 CATALOG(pg_autovacuum,1248) BKI_WITHOUT_OIDS
 {
-	Oid			vacrelid;			/* OID of table */
-	bool		enabled;			/* enabled for this table? */
+	Oid			vacrelid;		/* OID of table */
+	bool		enabled;		/* enabled for this table? */
 	int4		vac_base_thresh;	/* base threshold value */
-	float4		vac_scale_factor;	/* reltuples scaling factor */
+	float4		vac_scale_factor;		/* reltuples scaling factor */
 	int4		anl_base_thresh;	/* base threshold value */
-	float4		anl_scale_factor;	/* reltuples scaling factor */
-	int4		vac_cost_delay;		/* vacuum cost-based delay */
-	int4		vac_cost_limit;		/* vacuum cost limit */
-	int4		freeze_min_age;		/* vacuum min freeze age */
-	int4		freeze_max_age;		/* max age before forcing vacuum */
+	float4		anl_scale_factor;		/* reltuples scaling factor */
+	int4		vac_cost_delay; /* vacuum cost-based delay */
+	int4		vac_cost_limit; /* vacuum cost limit */
+	int4		freeze_min_age; /* vacuum min freeze age */
+	int4		freeze_max_age; /* max age before forcing vacuum */
 } FormData_pg_autovacuum;
+
+/* GPDB added foreign key definitions for gpcheckcat. */
+/* FIXME: Missing! */
 
 /* ----------------
  *		Form_pg_autovacuum corresponds to a pointer to a tuple with

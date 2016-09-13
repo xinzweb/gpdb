@@ -112,18 +112,6 @@ _bitmap_wrtbuf(Buffer buf)
 }
 
 /*
- * _bitmap_wrtnorelbuf() -- write a buffer page to disk without still holding
- *		the pin on this page.
- */
-void
-_bitmap_wrtnorelbuf(Buffer buf)
-{
-	MIRROREDLOCK_BUFMGR_MUST_ALREADY_BE_HELD;
-
-	MarkBufferDirty(buf);
-}
-
-/*
  * _bitmap_relbuf() -- release the buffer without writing.
  */
 void
@@ -433,7 +421,7 @@ _bitmap_init(Relation rel, Oid comptypeOid,
 	 * after all, we have fixed size data
 	 */
 	o = PageAddItem(currLovPage, (Item)lovItem, sizeof(BMLOVItemData),
-                    newOffset, LP_USED);
+                    newOffset, false, false);
 
 	if (o == InvalidOffsetNumber)
 		ereport(ERROR,

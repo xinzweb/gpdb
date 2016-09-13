@@ -13,7 +13,7 @@
  *
  * Copyright (c) 2003-2009, PostgreSQL Global Development Group
  *
- * $PostgreSQL: pgsql/src/include/nodes/bitmapset.h,v 1.9 2007/01/05 22:19:55 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/nodes/bitmapset.h,v 1.10 2008/01/01 19:45:58 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -72,7 +72,6 @@ extern bool bms_is_empty(const Bitmapset *a);
 
 /* these routines recycle (modify or free) their non-const inputs: */
 
-extern Bitmapset *bms_assign(Bitmapset *tgt, const Bitmapset *src);
 extern Bitmapset *bms_add_member(Bitmapset *a, int x);
 extern Bitmapset *bms_del_member(Bitmapset *a, int x);
 extern Bitmapset *bms_add_members(Bitmapset *a, const Bitmapset *b);

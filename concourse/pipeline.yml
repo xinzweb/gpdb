@@ -1,0 +1,173 @@
+resource_types:
+- name: pull-request
+  type: docker-image
+  source:
+    repository: xinzweb/pr
+
+resources:
+  - name: gpdb_src
+    type: pull-request
+    source:
+      repo: greenplum-db/gpdb
+      access_token: {{gpdb_access_token}}
+      private_key: {{gpdb_deploy_key}}
+      git-config:
+      - name: fetch.recurseSubmodules
+        value: false
+  - name: gpos_github_release
+    type: github-release
+    source:
+      user: greenplum-db
+      repository: gpos
+      access_token: {{gposbot_access_token}}
+
+  - name: orca_github_release
+    type: github-release
+    source:
+      user: greenplum-db
+      repository: gporca
+      access_token: {{gporcabot_access_token}}
+
+  - name: bin_xerces
+    type: s3
+    source:
+      access_key_id: {{aws-access-key-id}}
+      bucket: {{bucket-name}}
+      region_name: {{aws-region}}
+      secret_access_key: {{aws-secret-access-key}}
+      versioned_file: bin_xerces_centos5.tar.gz
+
+  - name: bin_gpdb
+    type: s3
+    source:
+      access_key_id: {{aws-access-key-id}}
+      bucket: gporca-concourse-bucket
+      region_name: us-west-2
+      secret_access_key: {{aws-secret-access-key}}
+      versioned_file: bin_gpdb_with_orca_centos6.tar.gz
+
+  - name: regression_diffs
+    type: s3
+    source:
+       access_key_id: {{aws-access-key-id}}
+       bucket: {{bucket-name}}
+       region_name: {{aws-region}}
+       secret_access_key: {{aws-secret-access-key}}
+       versioned_file: regression.diffs
+
+  - name: regression_out
+    type: s3
+    source:
+       access_key_id: {{aws-access-key-id}}
+       bucket: {{bucket-name}}
+       region_name: {{aws-region}}
+       secret_access_key: {{aws-secret-access-key}}
+       versioned_file: regression.out
+
+
+jobs:
+  - name: build_with_orca
+    plan:
+      - aggregate:
+        - get: gpos_github_release
+          params:
+            globs:
+              - bin_gpos_centos5_release.tar.gz
+        - get: orca_github_release
+          params:
+            globs:
+              - bin_orca_centos5_release.tar.gz
+        - get: bin_xerces
+        - get: gpdb_src
+          version: every
+          trigger: true
+        - put: gpdb_src
+          params:
+            path: gpdb_src
+            status: pending
+      - task: build_with_orca
+        file: gpdb_src/concourse/build_with_orca.yml
+        input_mapping:
+          bin_orca: orca_github_release
+          bin_gpos: gpos_github_release
+        on_success:
+          put: gpdb_src
+          params:
+            path: gpdb_src
+            status: pending
+        on_failure:
+          put: gpdb_src
+          params:
+            path: gpdb_src
+            status: failure
+      - task: package_tarball
+        file: gpdb_src/concourse/package_tarball.yml
+        on_success:
+          put: gpdb_src
+          params:
+            path: gpdb_src
+            status: pending
+        on_failure:
+          put: gpdb_src
+          params:
+            path: gpdb_src
+            status: failure
+      - put: bin_gpdb
+        params:
+          file: package_tarball/bin_gpdb.tar.gz
+
+
+  - name: icg
+    plan:
+      - aggregate:
+        - get: gpos_github_release
+          params:
+            globs:
+              - bin_gpos_centos5_release.tar.gz
+          passed:
+            - build_with_orca
+        - get: orca_github_release
+          params:
+            globs:
+              - bin_orca_centos5_release.tar.gz
+          passed:
+            - build_with_orca
+        - get: bin_xerces
+          passed:
+            - build_with_orca
+        - get: bin_gpdb
+          passed:
+            - build_with_orca
+        - get: gpdb_src
+          trigger: true
+          passed:
+            - build_with_orca
+          params:
+            submodules: none
+        - put: gpdb_src
+          params:
+            path: gpdb_src
+            status: pending
+      - task: icg
+        file: gpdb_src/concourse/test_with_orca.yml
+        input_mapping:
+          bin_orca: orca_github_release
+          bin_gpos: gpos_github_release
+        timeout: 2h30m
+        on_success:
+          put: gpdb_src
+          params:
+            path: gpdb_src
+            status: success
+        on_failure:
+          aggregate:
+          - put: regression_diffs
+            params:
+              from: icg_output/regression.diffs
+          - put: regression_out
+            params:
+              from: icg_output/regression.out
+          - put: gpdb_src
+            params:
+              path: gpdb_src
+              status: failure

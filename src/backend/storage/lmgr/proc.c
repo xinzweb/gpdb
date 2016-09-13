@@ -9,7 +9,7 @@
  *
  *
  * IDENTIFICATION
- *	    $PostgreSQL: pgsql/src/backend/storage/lmgr/proc.c,v 1.188 2007/04/16 18:29:53 alvherre Exp $
+ *	  $PostgreSQL: pgsql/src/backend/storage/lmgr/proc.c,v 1.199 2008/01/26 19:55:08 tgl Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -38,11 +38,15 @@
 
 #include "access/transam.h"
 #include "access/xact.h"
+#include "catalog/namespace.h" /* TempNamespaceOidIsValid */
+#include "commands/async.h"
 #include "miscadmin.h"
 #include "postmaster/autovacuum.h"
 #include "replication/syncrep.h"
 #include "storage/ipc.h"
 #include "storage/spin.h"
+#include "storage/sinval.h"
+#include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/pmsignal.h"
@@ -63,6 +67,7 @@
 int			DeadlockTimeout = 1000;
 int			StatementTimeout = 0;
 int			IdleSessionGangTimeout = 18000;
+bool		log_lock_waits = false;
 
 /* Pointer to this process's PGPROC struct, if any */
 PGPROC	   *MyProc = NULL;
@@ -89,16 +94,23 @@ static LOCALLOCK *lockAwaited = NULL;
 /* Mark these volatile because they can be changed by signal handler */
 static volatile bool statement_timeout_active = false;
 static volatile bool deadlock_timeout_active = false;
+static volatile DeadLockState deadlock_state = DS_NOT_YET_CHECKED;
+static volatile sig_atomic_t clientWaitTimeoutInterruptEnabled = 0;
+static volatile sig_atomic_t clientWaitTimeoutInterruptOccurred = 0;
 volatile bool cancel_from_timeout = false;
+
+/* timeout_start_time is set when log_lock_waits is true */
+static TimestampTz timeout_start_time;
 
 /* statement_fin_time is valid only if statement_timeout_active is true */
 static TimestampTz statement_fin_time;
-
 
 static void RemoveProcFromArray(int code, Datum arg);
 static void ProcKill(int code, Datum arg);
 static void AuxiliaryProcKill(int code, Datum arg);
 static bool CheckStatementTimeout(void);
+static void ClientWaitTimeoutInterruptHandler(void);
+static void ProcessClientWaitTimeout(void);
 
 
 /*
@@ -340,17 +352,21 @@ InitProcess(void)
 	 */
 	SHMQueueElemInit(&(MyProc->links));
 	MyProc->waitStatus = STATUS_OK;
+	MyProc->lxid = InvalidLocalTransactionId;
 	MyProc->xid = InvalidTransactionId;
-	LocalDistribXactRef_Init(&MyProc->localDistribXactRef);
+	MyProc->localDistribXactData.state = LOCALDISTRIBXACT_STATE_NONE;
 	MyProc->xmin = InvalidTransactionId;
 	MyProc->serializableIsoLevel = false;
 	MyProc->inDropTransaction = false;
 	MyProc->pid = MyProcPid;
-	/* databaseId and roleId will be filled in later */
+	/* backendId, databaseId and roleId will be filled in later */
+	MyProc->backendId = InvalidBackendId;
 	MyProc->databaseId = InvalidOid;
 	MyProc->roleId = InvalidOid;
-	MyProc->inVacuum = false;
-	MyProc->isAutovacuum = IsAutoVacuumWorkerProcess();
+	MyProc->inCommit = false;
+	MyProc->vacuumFlags = 0;
+	if (IsAutoVacuumWorkerProcess())
+		MyProc->vacuumFlags |= PROC_IS_AUTOVACUUM;
 	MyProc->lwWaiting = false;
 	MyProc->lwExclusive = false;
 	MyProc->lwWaitLink = NULL;
@@ -371,21 +387,22 @@ InitProcess(void)
 
     /* 
      * A nonzero gp_session_id uniquely identifies an MPP client session 
-     * over the lifetime of the entry postmaster process.  A qDisp passes
-     * its gp_session_id down to all of its qExecs.  If this is a qExec,
+     * over the lifetime of the entry postmaster process. A qDisp passes
+     * its gp_session_id down to all of its qExecs. If this is a qExec,
      * we have already received the gp_session_id from the qDisp.
      */
-    elog(DEBUG1,"InitProcess(): gp_session_id %d, gp_is_callback %d",gp_session_id,gp_is_callback);
-    Assert(gp_session_id > 0 || !gp_is_callback);
     if (Gp_role == GP_ROLE_DISPATCH && gp_session_id == -1)
         gp_session_id = mppLocalProcessSerial;
     MyProc->mppSessionId = gp_session_id;
+    elog(DEBUG1,"InitProcess(): gp_session_id %d, Gp_role %d",gp_session_id, Gp_role);
     
     MyProc->mppIsWriter = Gp_is_writer;
-    
-    if (Gp_role == GP_ROLE_DISPATCH)
-    	MyProc->mppIsWriter = !gp_is_callback;
 
+	if (Gp_role == GP_ROLE_DISPATCH)
+	{
+		MyProc->mppIsWriter = true;
+	}
+    
 	/* Initialize fields for sync rep */
 	MyProc->waitLSN.xlogid = 0;
 	MyProc->waitLSN.xrecoff = 0;
@@ -524,8 +541,9 @@ InitAuxiliaryProcess(void)
 	 */
 	SHMQueueElemInit(&(MyProc->links));
 	MyProc->waitStatus = STATUS_OK;
+	MyProc->lxid = InvalidLocalTransactionId;
 	MyProc->xid = InvalidTransactionId;
-	LocalDistribXactRef_Init(&MyProc->localDistribXactRef);
+	MyProc->localDistribXactData.state = LOCALDISTRIBXACT_STATE_NONE;
 	MyProc->xmin = InvalidTransactionId;
 	MyProc->serializableIsoLevel = false;
 	MyProc->inDropTransaction = false;
@@ -534,8 +552,8 @@ InitAuxiliaryProcess(void)
     MyProc->mppLocalProcessSerial = 0;
     MyProc->mppSessionId = 0;
     MyProc->mppIsWriter = false;
-	MyProc->inVacuum = false;
-	MyProc->isAutovacuum = false;
+	MyProc->inCommit = false;
+	MyProc->vacuumFlags = 0;
 	MyProc->lwWaiting = false;
 	MyProc->lwExclusive = false;
 	MyProc->lwWaitLink = NULL;
@@ -586,25 +604,23 @@ HaveNFreeProcs(int n)
 /*
  * Cancel any pending wait for lock, when aborting a transaction.
  *
- * Returns true if we had been waiting for a lock, else false.
- *
  * (Normally, this would only happen if we accept a cancel/die
  * interrupt while waiting; but an ereport(ERROR) while waiting is
  * within the realm of possibility, too.)
  */
-bool
+void
 LockWaitCancel(void)
 {
 	LWLockId	partitionLock;
 
 	/* Nothing to do if we weren't waiting for a lock */
 	if (lockAwaited == NULL)
-		return false;
+		return;
 
 	/* Don't try to cancel resource locks.*/
 	if (Gp_role == GP_ROLE_DISPATCH && ResourceScheduler &&
 		LOCALLOCK_LOCKMETHOD(*lockAwaited) == RESOURCE_LOCKMETHOD)
-		return false;
+		return;
 
 	/* Turn off the deadlock timer, if it's still running (see ProcSleep) */
 	disable_sig_alarm(false);
@@ -616,7 +632,7 @@ LockWaitCancel(void)
 	if (MyProc->links.next != INVALID_OFFSET)
 	{
 		/* We could not have been granted the lock yet */
-		RemoveFromWaitQueue(MyProc, lockAwaited->hashcode, true);
+		RemoveFromWaitQueue(MyProc, lockAwaited->hashcode);
 	}
 	else
 	{
@@ -643,12 +659,6 @@ LockWaitCancel(void)
 	 * wakeup signal isn't harmful, and it seems not worth expending cycles to
 	 * get rid of a signal that most likely isn't there.
 	 */
-
-	/*
-	 * Return true even if we were kicked off the lock before we were able to
-	 * remove ourselves.
-	 */
-	return true;
 }
 
 
@@ -687,7 +697,7 @@ static void
 RemoveProcFromArray(int code, Datum arg)
 {
 	Assert(MyProc != NULL);
-	ProcArrayRemove(MyProc, /* forPrepare */ false, /* (not used) isCommit */ false);
+	ProcArrayRemove(MyProc, InvalidTransactionId);
 }
 
 /*
@@ -762,7 +772,7 @@ ProcKill(int code, Datum arg)
 	 */
 	LWLockReleaseAll();
 
-	LocalDistribXactRef_Release(&MyProc->localDistribXactRef);
+	MyProc->localDistribXactData.state = LOCALDISTRIBXACT_STATE_NONE;
     MyProc->mppLocalProcessSerial = 0;
     MyProc->mppSessionId = 0;
     MyProc->mppIsWriter = false;
@@ -834,8 +844,15 @@ AuxiliaryProcKill(int code, Datum arg)
 	/* Release ownership of the process's latch, too */
 	DisownLatch(&MyProc->procLatch);
 
+	SpinLockAcquire(ProcStructLock);
+
+	/* Mark auxiliary proc no longer in use */
+	MyProc->pid = 0;
+
 	/* Update shared estimate of spins_per_delay */
 	update_spins_per_delay();
+
+	SpinLockRelease(ProcStructLock);
 
 	/*
 	 * If the parent process of this auxiliary process does not exist, we
@@ -923,6 +940,8 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable)
 	PROC_QUEUE *waitQueue = &(lock->waitProcs);
 	LOCKMASK	myHeldLocks = MyProc->heldLocks;
 	bool		early_deadlock = false;
+	bool		allow_autovacuum_cancel = true;
+	int			myWaitStatus;
 	PGPROC	   *proc;
 	int			i;
 
@@ -1021,7 +1040,7 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable)
 	 */
 	if (early_deadlock)
 	{
-		RemoveFromWaitQueue(MyProc, hashcode, false);
+		RemoveFromWaitQueue(MyProc, hashcode);
 		return STATUS_ERROR;
 	}
 
@@ -1037,6 +1056,9 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable)
 	 * LockWaitCancel will clean up if cancel/die happens.
 	 */
 	LWLockRelease(partitionLock);
+
+	/* Reset deadlock_state before enabling the signal handler */
+	deadlock_state = DS_NOT_YET_CHECKED;
 
 	/*
 	 * Set timer so we can wake up after awhile and check for a deadlock. If a
@@ -1070,7 +1092,147 @@ ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable)
 	do
 	{
 		PGSemaphoreLock(&MyProc->sem, true);
-	} while (MyProc->waitStatus == STATUS_WAITING);
+
+		/*
+		 * waitStatus could change from STATUS_WAITING to something else
+		 * asynchronously.	Read it just once per loop to prevent surprising
+		 * behavior (such as missing log messages).
+		 */
+		myWaitStatus = MyProc->waitStatus;
+
+		/*
+		 * If we are not deadlocked, but are waiting on an autovacuum-induced
+		 * task, send a signal to interrupt it.
+		 */
+		if (deadlock_state == DS_BLOCKED_BY_AUTOVACUUM && allow_autovacuum_cancel)
+		{
+			PGPROC	   *autovac = GetBlockingAutoVacuumPgproc();
+
+			LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+
+			/*
+			 * Only do it if the worker is not working to protect against Xid
+			 * wraparound.
+			 */
+			if ((autovac != NULL) &&
+				(autovac->vacuumFlags & PROC_IS_AUTOVACUUM) &&
+				!(autovac->vacuumFlags & PROC_VACUUM_FOR_WRAPAROUND))
+			{
+				int			pid = autovac->pid;
+				StringInfoData locktagbuf;
+				StringInfoData logbuf;		/* errdetail for server log */
+
+				initStringInfo(&locktagbuf);
+				initStringInfo(&logbuf);
+				DescribeLockTag(&locktagbuf, &lock->tag);
+				appendStringInfo(&logbuf,
+					  _("Process %d waits for %s on %s."),
+						 MyProcPid,
+						 GetLockmodeName(lock->tag.locktag_lockmethodid,
+										 lockmode),
+						 locktagbuf.data);
+
+				/* release lock as quickly as possible */
+				LWLockRelease(ProcArrayLock);
+
+				ereport(LOG,
+						(errmsg("sending cancel to blocking autovacuum PID %d",
+							pid),
+						 errdetail("%s", logbuf.data)));
+
+				pfree(logbuf.data);
+				pfree(locktagbuf.data);
+
+				/* send the autovacuum worker Back to Old Kent Road */
+				if (kill(pid, SIGINT) < 0)
+				{
+					/* Just a warning to allow multiple callers */
+					ereport(WARNING,
+							(errmsg("could not send signal to process %d: %m",
+									pid)));
+				}
+			}
+			else
+				LWLockRelease(ProcArrayLock);
+
+			/* prevent signal from being resent more than once */
+			allow_autovacuum_cancel = false;
+		}
+
+		/*
+		 * If awoken after the deadlock check interrupt has run, and
+		 * log_lock_waits is on, then report about the wait.
+		 */
+		if (log_lock_waits && deadlock_state != DS_NOT_YET_CHECKED)
+		{
+			StringInfoData buf;
+			const char *modename;
+			long		secs;
+			int			usecs;
+			long		msecs;
+
+			initStringInfo(&buf);
+			DescribeLockTag(&buf, &locallock->tag.lock);
+			modename = GetLockmodeName(locallock->tag.lock.locktag_lockmethodid,
+									   lockmode);
+			TimestampDifference(timeout_start_time, GetCurrentTimestamp(),
+								&secs, &usecs);
+			msecs = secs * 1000 + usecs / 1000;
+			usecs = usecs % 1000;
+
+			if (deadlock_state == DS_SOFT_DEADLOCK)
+				ereport(LOG,
+						(errmsg("process %d avoided deadlock for %s on %s by rearranging queue order after %ld.%03d ms",
+							  MyProcPid, modename, buf.data, msecs, usecs)));
+			else if (deadlock_state == DS_HARD_DEADLOCK)
+			{
+				/*
+				 * This message is a bit redundant with the error that will be
+				 * reported subsequently, but in some cases the error report
+				 * might not make it to the log (eg, if it's caught by an
+				 * exception handler), and we want to ensure all long-wait
+				 * events get logged.
+				 */
+				ereport(LOG,
+						(errmsg("process %d detected deadlock while waiting for %s on %s after %ld.%03d ms",
+							  MyProcPid, modename, buf.data, msecs, usecs)));
+			}
+
+			if (myWaitStatus == STATUS_WAITING)
+				ereport(LOG,
+						(errmsg("process %d still waiting for %s on %s after %ld.%03d ms",
+							  MyProcPid, modename, buf.data, msecs, usecs)));
+			else if (myWaitStatus == STATUS_OK)
+				ereport(LOG,
+					(errmsg("process %d acquired %s on %s after %ld.%03d ms",
+							MyProcPid, modename, buf.data, msecs, usecs)));
+			else
+			{
+				Assert(myWaitStatus == STATUS_ERROR);
+
+				/*
+				 * Currently, the deadlock checker always kicks its own
+				 * process, which means that we'll only see STATUS_ERROR when
+				 * deadlock_state == DS_HARD_DEADLOCK, and there's no need to
+				 * print redundant messages.  But for completeness and
+				 * future-proofing, print a message if it looks like someone
+				 * else kicked us off the lock.
+				 */
+				if (deadlock_state != DS_HARD_DEADLOCK)
+					ereport(LOG,
+							(errmsg("process %d failed to acquire %s on %s after %ld.%03d ms",
+							  MyProcPid, modename, buf.data, msecs, usecs)));
+			}
+
+			/*
+			 * At this point we might still need to wait for the lock. Reset
+			 * state so we don't print the above messages again.
+			 */
+			deadlock_state = DS_NO_DEADLOCK;
+
+			pfree(buf.data);
+		}
+	} while (myWaitStatus == STATUS_WAITING);
 
 	/*
 	 * Disable the timer, if it's still running
@@ -1257,57 +1419,72 @@ CheckDeadLock(void)
 		DumpAllLocks();
 #endif
 
-	if (!DeadLockCheck(MyProc))
+	/* Run the deadlock check, and set deadlock_state for use by ProcSleep */
+	deadlock_state = DeadLockCheck(MyProc);
+
+	if (deadlock_state == DS_HARD_DEADLOCK)
 	{
-		/* No deadlock, so keep waiting */
-		goto check_done;
+		/*
+		 * Oops.  We have a deadlock.
+		 *
+		 * Get this process out of wait state.	(Note: we could do this more
+		 * efficiently by relying on lockAwaited, but use this coding to
+		 * preserve the flexibility to kill some other transaction than the
+		 * one detecting the deadlock.)
+		 *
+		 * RemoveFromWaitQueue sets MyProc->waitStatus to STATUS_ERROR, so
+		 * ProcSleep will report an error after we return from the signal
+		 * handler.
+		 */
+		Assert(MyProc->waitLock != NULL);
+		if (Gp_role == GP_ROLE_DISPATCH && ResourceScheduler && 
+			LOCK_LOCKMETHOD(*(MyProc->waitLock)) == RESOURCE_LOCKMETHOD)
+		{
+			ResRemoveFromWaitQueue(MyProc, 
+								   LockTagHashCode(&(MyProc->waitLock->tag)));
+		}
+		else
+		{
+			RemoveFromWaitQueue(MyProc, LockTagHashCode(&(MyProc->waitLock->tag)));
+		}
+
+		/*
+		 * Unlock my semaphore so that the interrupted ProcSleep() call can
+		 * finish.
+		 */
+		PGSemaphoreUnlock(&MyProc->sem);
+
+		/*
+		 * We're done here.  Transaction abort caused by the error that
+		 * ProcSleep will raise will cause any other locks we hold to be
+		 * released, thus allowing other processes to wake up; we don't need
+		 * to do that here.  NOTE: an exception is that releasing locks we
+		 * hold doesn't consider the possibility of waiters that were blocked
+		 * behind us on the lock we just failed to get, and might now be
+		 * wakable because we're not in front of them anymore.  However,
+		 * RemoveFromWaitQueue took care of waking up any such processes.
+		 */
+	}
+	else if (log_lock_waits || deadlock_state == DS_BLOCKED_BY_AUTOVACUUM)
+	{
+		/*
+		 * Unlock my semaphore so that the interrupted ProcSleep() call can
+		 * print the log message (we daren't do it here because we are inside
+		 * a signal handler).  It will then sleep again until someone releases
+		 * the lock.
+		 *
+		 * If blocked by autovacuum, this wakeup will enable ProcSleep to send
+		 * the cancelling signal to the autovacuum worker.
+		 */
+		PGSemaphoreUnlock(&MyProc->sem);
 	}
 
 	/*
-	 * Oops.  We have a deadlock.
-	 *
-	 * Get this process out of wait state.	(Note: we could do this more
-	 * efficiently by relying on lockAwaited, but use this coding to
-	 * preserve the flexibility to kill some other transaction than the
-	 * one detecting the deadlock.)
-	 *
-	 * RemoveFromWaitQueue sets MyProc->waitStatus to STATUS_ERROR, so
-	 * ProcSleep will report an error after we return from the signal
-	 * handler.
-	 */
-	Assert(MyProc->waitLock != NULL);
-	if (Gp_role == GP_ROLE_DISPATCH && ResourceScheduler && 
-		LOCK_LOCKMETHOD(*(MyProc->waitLock)) == RESOURCE_LOCKMETHOD)
-	{
-		ResRemoveFromWaitQueue(MyProc, 
-							   LockTagHashCode(&(MyProc->waitLock->tag)));
-	}
-	else
-	{
-		RemoveFromWaitQueue(MyProc, LockTagHashCode(&(MyProc->waitLock->tag)), true);
-	}
-
-	/*
-	 * Unlock my semaphore so that the interrupted ProcSleep() call can
-	 * finish.
-	 */
-	PGSemaphoreUnlock(&MyProc->sem);
-
-	/*
-	 * We're done here.  Transaction abort caused by the error that ProcSleep
-	 * will raise will cause any other locks we hold to be released, thus
-	 * allowing other processes to wake up; we don't need to do that here.
-	 * NOTE: an exception is that releasing locks we hold doesn't consider the
-	 * possibility of waiters that were blocked behind us on the lock we just
-	 * failed to get, and might now be wakable because we're not in front of
-	 * them anymore.  However, RemoveFromWaitQueue took care of waking up any
-	 * such processes.
-	 */
-
-	/*
-	 * Release locks acquired at head of routine.  Order is not critical, so
-	 * do it back-to-front to avoid waking another CheckDeadLock instance
-	 * before it can get all the locks.
+	 * And release locks.  We do this in reverse order for two reasons: (1)
+	 * Anyone else who needs more than one of the locks will be trying to lock
+	 * them in increasing order; we don't want to release the other process
+	 * until it can get all the locks it needs. (2) This avoids O(N^2)
+	 * behavior inside LWLockRelease.
 	 */
 check_done:
 	for (i = NUM_LOCK_PARTITIONS; --i >= 0;)
@@ -1408,8 +1585,8 @@ enable_sig_alarm(int delayms, bool is_statement_timeout)
 		 * to the state variables.	The deadlock checker may get run earlier
 		 * than normal, but that does no harm.
 		 */
-		fin_time = GetCurrentTimestamp();
-		fin_time = TimestampTzPlusMilliseconds(fin_time, delayms);
+		timeout_start_time = GetCurrentTimestamp();
+		fin_time = TimestampTzPlusMilliseconds(timeout_start_time, delayms);
 		deadlock_timeout_active = true;
 		if (fin_time >= statement_fin_time)
 			return true;
@@ -1418,6 +1595,9 @@ enable_sig_alarm(int delayms, bool is_statement_timeout)
 	{
 		/* Begin deadlock timeout with no statement-level timeout */
 		deadlock_timeout_active = true;
+		/* GetCurrentTimestamp can be expensive, so only do it if we must */
+		if (log_lock_waits)
+			timeout_start_time = GetCurrentTimestamp();
 	}
 
 	/* If we reach here, okay to set the timer interrupt */
@@ -1491,13 +1671,6 @@ disable_sig_alarm(bool is_statement_timeout)
  * we need to allocate gangs (at least the writer gang) to do anything.  This entails extra work,
  * so we don't want to do this if we don't think the session has gone idle.
  *
- * We can call cleanupIdleReaderGangs() to just free some resources, or cleanupAllIdleGangs() to
- * free up everything possible on the segDB side.  At the moment, I can't find a reason to
- * use cleanupIdleReaderGangs(), but it we wanted to, we would have two timeouts:  The first
- * when we free the reader gangs, and the second later time free the writer gang.
- * My current thinking is that it is better to free all the gangs as soon as we decide
- * the session is idle.
- *
  * P.s:  Is there anything we can free up on the master (QD) side?  I can't think of anything.
  *
  */
@@ -1505,18 +1678,45 @@ static void
 HandleClientWaitTimeout(void)
 {
 	elog(DEBUG2,"HandleClientWaitTimeout");
+
 	/*
 	 * cancel the timer, as there is no reason we need it to go off again.
 	 */
 	disable_sig_alarm(false);
+
 	/*
 	 * Free gangs to free up resources on the segDBs.
 	 */
 	if (gangsExist())
 	{
-		cleanupAllIdleGangs();
+		if (IsTransactionOrTransactionBlock() || TempNamespaceOidIsValid())
+		{
+			/*
+			 * If we are in a transaction, we can't release the writer gang,
+			 * as this will abort the transaction.
+			 *
+			 * If we have a TempNameSpace, we can't release the writer gang, as this
+			 * would drop any temp tables we own.
+			 *
+			 * Since we are idle, any reader gangs will be available but not allocated.
+			 */
+			disconnectAndDestroyIdleReaderGangs();
+		}
+		else
+		{
+			/*
+			 * Get rid of ALL gangs... Readers and primary writer.
+			 * After this, we have no resources being consumed on the segDBs at all.
+			 *
+			 * Our session wasn't destroyed due to an fatal error or FTS action, so
+			 * we don't need to do anything special.  Specifically, we DON'T want
+			 * to act like we are now in a new session, since that would be confusing
+			 * in the log.
+			 *
+			 */
+			disconnectAndDestroyAllGangs(false);
+		}
 	}
-
 }
 
 /*
@@ -1626,12 +1826,115 @@ handle_sig_alarm(SIGNAL_ARGS)
 		 */
 		if (DoingCommandRead)
 		{
-			(void) HandleClientWaitTimeout();
+			(void) ClientWaitTimeoutInterruptHandler();
 			deadlock_timeout_active = false;
 		}
 	}
 
 	errno = save_errno;
+}
+
+static void
+ClientWaitTimeoutInterruptHandler(void)
+{
+	int save_errno = errno;
+
+	/* Don't joggle the elbow of proc_exit */
+	if (proc_exit_inprogress)
+		return;
+
+	if (clientWaitTimeoutInterruptEnabled)
+	{
+		bool save_ImmediateInterruptOK = ImmediateInterruptOK;
+
+		/*
+		 * We may be called while ImmediateInterruptOK is true; turn it off
+		 * while messing with the client wait timeout state.
+		 */
+		ImmediateInterruptOK = false;
+
+		/*
+		 * I'm not sure whether some flavors of Unix might allow another
+		 * SIGALRM occurrence to recursively interrupt this routine. To cope
+		 * with the possibility, we do the same sort of dance that
+		 * EnableNotifyInterrupt must do -- see that routine for comments.
+		 */
+		clientWaitTimeoutInterruptEnabled = 0; /* disable any recursive signal */
+		clientWaitTimeoutInterruptOccurred = 1; /* do at least one iteration */
+		for (;;)
+		{
+			clientWaitTimeoutInterruptEnabled = 1;
+			if (!clientWaitTimeoutInterruptOccurred)
+				break;
+			clientWaitTimeoutInterruptEnabled = 0;
+			if (clientWaitTimeoutInterruptOccurred)
+			{
+				ProcessClientWaitTimeout();
+			}
+		}
+
+		/*
+		 * Restore ImmediateInterruptOK, and check for interrupts if needed.
+		 */
+		ImmediateInterruptOK = save_ImmediateInterruptOK;
+		if (save_ImmediateInterruptOK)
+			CHECK_FOR_INTERRUPTS();
+	}
+	else
+	{
+		/*
+		 * In this path it is NOT SAFE to do much of anything, except this:
+		 */
+		clientWaitTimeoutInterruptOccurred = 1;
+	}
+
+	errno = save_errno;
+}
+
+void
+EnableClientWaitTimeoutInterrupt(void)
+{
+	for (;;)
+	{
+		clientWaitTimeoutInterruptEnabled = 1;
+		if (!clientWaitTimeoutInterruptOccurred)
+			break;
+		clientWaitTimeoutInterruptEnabled = 0;
+		if (clientWaitTimeoutInterruptOccurred)
+		{
+			ProcessClientWaitTimeout();
+		}
+	}
+}
+
+bool
+DisableClientWaitTimeoutInterrupt(void)
+{
+	bool result = (clientWaitTimeoutInterruptEnabled != 0);
+
+	clientWaitTimeoutInterruptEnabled = 0;
+
+	return result;
+}
+
+static void
+ProcessClientWaitTimeout(void)
+{
+	bool notify_enabled;
+	bool catchup_enabled;
+
+	/* Must prevent SIGUSR1 and SIGUSR2 interrupt while I am running */
+	notify_enabled = DisableNotifyInterrupt();
+	catchup_enabled = DisableCatchupInterrupt();
+
+	clientWaitTimeoutInterruptOccurred = 0;
+
+	HandleClientWaitTimeout();
+
+	if (notify_enabled)
+		EnableNotifyInterrupt();
+	if (catchup_enabled)
+		EnableCatchupInterrupt();
 }
 
 /*
@@ -1657,6 +1960,8 @@ ResProcSleep(LOCKMODE lockmode, LOCALLOCK *locallock, void *incrementSet)
 	uint32		hashcode = locallock->hashcode;
 	LWLockId	partitionLock = LockHashPartitionLock(hashcode);
 
+	bool		selflock = true;		/* initialize result for error. */
+
 	/*
 	 * Don't check my held locks, as we just add at the end of the queue.
 	 */
@@ -1675,6 +1980,16 @@ ResProcSleep(LOCKMODE lockmode, LOCALLOCK *locallock, void *incrementSet)
 
 	MyProc->waitStatus = STATUS_ERROR;	/* initialize result for error */
 
+	/* Now check the status of the self lock footgun. */
+	selflock = ResCheckSelfDeadLock(lock, proclock, incrementSet);
+	if (selflock)
+	{
+		LWLockRelease(partitionLock);
+		ereport(ERROR,
+				(errcode(ERRCODE_T_R_DEADLOCK_DETECTED),
+				 errmsg("deadlock detected, locking against self")));
+	}
+
 	/* Mark that we are waiting for a lock */
 	lockAwaited = locallock;
 
@@ -1685,12 +2000,9 @@ ResProcSleep(LOCKMODE lockmode, LOCALLOCK *locallock, void *incrementSet)
    		elog(FATAL, "could not set timer for (resource lock) process wakeup");
 
 	/*
-	 * Sleep on the semaphore. see ProcSleep's comments for why we check the wait status here.
+	 * Sleep on the semaphore.
 	 */
-	do
-	{
-		PGSemaphoreLock(&MyProc->sem, true);
-	} while (MyProc->waitStatus == STATUS_WAITING);
+	PGSemaphoreLock(&MyProc->sem, true);
 
 	if (!disable_sig_alarm(false))
 		elog(FATAL, "could not disable timer for (resource lock) process wakeup");
@@ -1720,11 +2032,8 @@ ResLockWaitCancel(void)
 
 	if (lockAwaited != NULL)
 	{
-		/* Turn off the deadlock timer, if it's still running */
-		disable_sig_alarm(false);
-
 		/* Unlink myself from the wait queue, if on it  */
-		partitionLock = LockHashPartition(lockAwaited->hashcode);
+		partitionLock = LockHashPartitionLock(lockAwaited->hashcode);
 		LWLockAcquire(partitionLock, LW_EXCLUSIVE);
 
 		if (MyProc->links.next != INVALID_OFFSET)
@@ -1744,19 +2053,12 @@ ResLockWaitCancel(void)
 	}
 
 	/*
-	 * We used to do PGSemaphoreReset() here to ensure that our proc's wait
-	 * semaphore is reset to zero.	This prevented a leftover wakeup signal
-	 * from remaining in the semaphore if someone else had granted us the lock
-	 * we wanted before we were able to remove ourselves from the wait-list.
-	 * However, now that ResProcSleep loops until waitStatus changes, a leftover
-	 * wakeup signal isn't harmful, and it seems not worth expending cycles to
-	 * get rid of a signal that most likely isn't there.
+	 * Reset the proc wait semaphore to zero. This is necessary in the
+	 * scenario where someone else granted us the lock we wanted before we
+	 * were able to remove ourselves from the wait-list.
 	 */
+	PGSemaphoreReset(&MyProc->sem);
 
-	/*
-	 * Return true even if we were kicked off the lock before we were able to
-	 * remove ourselves.
-	 */
 	return;
 }
 

@@ -42,7 +42,6 @@ my $dpref = '';
 
 my $glob_compare_equiv;
 my $glob_make_equiv_expected;
-my $glob_ignore_headers;
 my $glob_ignore_plans;
 my $glob_ignore_whitespace;
 my @glob_init;
@@ -73,7 +72,6 @@ sub atmsort_init
 
     $glob_compare_equiv       = 0;
     $glob_make_equiv_expected = 0;
-    $glob_ignore_headers      = 0;
     $glob_ignore_plans        = 0;
     $glob_ignore_whitespace   = 0;
     @glob_init                = ();
@@ -91,16 +89,16 @@ sub atmsort_init
     my $verbose;
     my $orderwarn;
 
-    if ($args{DO_EQUIV} =~ m/^(ignore)/i)
+    if ($args{DO_EQUIV} =~ m/^ignore/i)
     {
         # ignore all - default
     }
-    elsif ($args{DO_EQUIV} =~ m/^(compare)/i)
+    elsif ($args{DO_EQUIV} =~ m/^compare/i)
     {
         # compare equiv region
         $compare_equiv = 1;
     }
-    elsif ($args{DO_EQUIV} =~ m/^(make)/i)
+    elsif ($args{DO_EQUIV} =~ m/^make/i)
     {
         # make equiv expected output
         $make_equiv_expected = 1;
@@ -112,7 +110,6 @@ sub atmsort_init
     $glob_compare_equiv       = $compare_equiv;
     $glob_make_equiv_expected = $make_equiv_expected;
 
-    $glob_ignore_headers      = $args{IGNORE_HEADERS};
     $glob_ignore_plans        = $args{IGNORE_PLANS};
 
     $glob_ignore_whitespace   = $ignore_headers; # XXX XXX: for now
@@ -166,10 +163,7 @@ sub _build_match_subs
     my $stat = [1];
 
      # filter out the comments and blank lines
-     $here_matchsubs =~ s/^\s*\#.*$//gm;
-     $here_matchsubs =~ s/^\s+$//gm;
-
-#    print $here_matchsubs;
+     $here_matchsubs =~ s/^\s*(?:#.*)?\R//gm;
 
     # split up the document into separate lines
     my @foo = split(/\n/, $here_matchsubs);
@@ -183,12 +177,6 @@ sub _build_match_subs
     while ($ii < scalar(@foo))
     {
         my $lin = $foo[$ii];
-
-        if ($lin =~ m/^\s*$/) # skip blanks
-        {
-            $ii++;
-            next;
-        }
 
         if (defined($msa))
         {
@@ -280,33 +268,20 @@ sub init_match_subs
     $here_matchsubs = << 'EOF_matchsubs';
 
 # some cleanup of greenplum-specific messages
-m/\s+(\W)?(\W)?\(seg.*pid.*\)/
+m/\s+(?:\W)?(?:\W)?\(seg.*pid.*\)/
 s/\s+(\W)?(\W)?\(seg.*pid.*\)//
 
-m/WARNING:\s+foreign key constraint \".*\" will require costly sequential scans/
-s/\".*\"/\"dummy key\"/
-
-m/CONTEXT:.*\s+of this segment db input data/
-s/\s+of this segment db input data//
-
 # distributed transactions
-m/(ERROR|WARNING|CONTEXT|NOTICE):.*gid\s+=\s+(\d+)/
+m/^(?:ERROR|WARNING|CONTEXT|NOTICE):.*gid\s+=\s+(?:\d+)/
 s/gid.*/gid DUMMY/
 
-m/(ERROR|WARNING|CONTEXT|NOTICE):.*DTM error.*gathered (\d+) results from cmd.*/
+m/^(?:ERROR|WARNING|CONTEXT|NOTICE):.*DTM error.*gathered (?:\d+) results from cmd.*/
 s/gathered.*results/gathered SOME_NUMBER_OF results/
 
-# fix code locations eg "(xact.c:1458)" to "(xact.c:SOME_LINE)"
-m/(ERROR|WARNING|CONTEXT|NOTICE):\s+Raise an error as directed by/
+m/^(?:ERROR|WARNING|CONTEXT|NOTICE):\s+Could not .* savepoint/
 s/\.c\:\d+\)/\.c\:SOME_LINE\)/
 
-m/(DETAIL|ERROR|WARNING|CONTEXT|NOTICE):\s+Raise .* for debug_dtm_action\s*\=\s* \d+/
-s/\.c\:\d+\)/\.c\:SOME_LINE\)/
-
-m/(ERROR|WARNING|CONTEXT|NOTICE):\s+Could not .* savepoint/
-s/\.c\:\d+\)/\.c\:SOME_LINE\)/
-
-m/(ERROR|WARNING|CONTEXT|NOTICE):.*connection.*failed.*(http|gpfdist)/
+m/^(?:ERROR|WARNING|CONTEXT|NOTICE):.*connection.*failed.*(?:http|gpfdist)/
 s/connection.*failed.*(http|gpfdist).*/connection failed dummy_protocol\:\/\/DUMMY_LOCATION/
 
 # the EOF ends the HERE document
@@ -360,27 +335,11 @@ sub _build_match_ignores
 
     my $stat = [1];
 
-     # filter out the comments and blank lines
-     $here_matchignores =~ s/^\s*\#.*$//gm;
-     $here_matchignores =~ s/^\s+$//gm;
-
-#    print $here_matchignores;
+    # filter out the comments and blank lines
+    $here_matchignores =~ s/^\s*(?:#.*)?\R//gm;
 
     # split up the document into separate lines
-    my @foo = split(/\n/, $here_matchignores);
-
-    my $matchignores_arr = [];
-
-    # build an array of match expressions
-    for my $lin (@foo)
-    {
-        next
-            if ($lin =~ m/^\s*$/); # skip blanks
-
-        push @{$matchignores_arr}, $lin;
-    }
-
-#    print Data::Dumper->Dump($matchignores_arr);
+    my @matchignores_arr = split(/\n/, $here_matchignores);
 
     my $bigdef;
 
@@ -390,7 +349,7 @@ sub _build_match_ignores
     # array
     my $mscount = 1;
 
-    for my $defi (@{$matchignores_arr})
+    for my $defi (@matchignores_arr)
     {
         $bigdef = '$fn1 = sub { my $ini = shift; '. "\n";
         $bigdef .= 'return ($ini =~ ' . $defi;
@@ -440,17 +399,16 @@ sub init_matchignores
 
         # XXX XXX: note the discrepancy in the NOTICE messages
         # 'distributed by' vs 'DISTRIBUTED BY'
-m/NOTICE:\s+Table doesn\'t have \'distributed by\' clause\, and no column type is suitable/i
+m/^NOTICE:  Table doesn\'t have \'distributed by\' clause/
+m/^NOTICE:  Table doesn\'t have \'DISTRIBUTED BY\' clause/
 
-m/NOTICE:\s+Table doesn\'t have \'DISTRIBUTED BY\' clause/i
+m/^NOTICE:  Dropping a column that is part of the distribution policy/
 
-m/NOTICE:\s+Dropping a column that is part of the distribution policy/
+m/^NOTICE:  Table has parent\, setting distribution columns to match parent table/
 
-m/NOTICE:\s+Table has parent\, setting distribution columns to match parent table/
+m/^HINT:  The \'DISTRIBUTED BY\' clause determines the distribution of data/
 
-m/HINT:\s+The \'DISTRIBUTED BY\' clause determines the distribution of data/
-
-m/WARNING:\s+Referential integrity \(.*\) constraints are not supported in Greenplum Database/
+m/^WARNING:  Referential integrity \(.*\) constraints are not supported in Greenplum Database/
 
 
 m/^\s*Distributed by:\s+\(.*\)\s*$/
@@ -460,7 +418,7 @@ m/^\s*Distributed by:\s+\(.*\)\s*$/
         #
         # the NOTICE is different from the ERROR case, which does not
         # end with "skipping"
-m/^NOTICE:\s+\w+\s+\".*\"\s+does not exist\,\s+skipping\s*$/
+m/^NOTICE:  \w+ \".*\" does not exist\, skipping\s*$/
 
 
 # the EOF ends the HERE document
@@ -523,10 +481,8 @@ sub tablelizer
 
     # fixup first, last column head (remove leading,trailing spaces)
 
-    $colheads[0] =~ s/^\s+//;
-    $colheads[0] =~ s/\s+$//;
-    $colheads[-1] =~ s/^\s+//;
-    $colheads[-1] =~ s/\s+$//;
+    $colheads[0] =~ s/^(\s+|\s+$)//;
+    $colheads[-1] =~ s/^(\s+|\s+$)//;
 
     return undef
         unless (scalar(@lines));
@@ -548,8 +504,7 @@ sub tablelizer
         {
             my $rawcol = shift @cols;
 
-            $rawcol =~ s/^\s+//;
-            $rawcol =~ s/\s+$//;
+            $rawcol =~ s/^(\s+|\s+$)//;
 
             my $colhd = $colheads[$colhdcnt];
             $rowh->{($colhdcnt+1)} = $rawcol;
@@ -589,7 +544,7 @@ sub format_explain
     if (exists($directive->{explain})
         && ($directive->{explain} =~ m/operator/i))
     {
-        $xopt = "operator";
+        $xopt = 'operator';
         $sort = 1;
     }
 
@@ -617,23 +572,16 @@ sub format_explain
     # Apply prefix to each line, if requested.
     if (defined($prefix) && length($prefix))
     {
-        my @prefixedlines;
-
         foreach my $line (@lines)
         {
             $line = $prefix . $line;
         }
     }
 
-    # Put back newlines
+    # Put back newlines and print
     foreach my $line (@lines)
     {
         $line .= "\n";
-    }
-
-    # Print it
-    foreach my $line (@lines)
-    {
         print $atmsort_outfh $line;
     }
 
@@ -831,12 +779,7 @@ sub format_query_output
 #            print "mvd no deps:", Data::Dumper->Dump(\@mvd_nodeps);
         }
 
-        my %unsorth;
-
-        for my $col (@allcols)
-        {
-            $unsorth{$col} = 1;
-        }
+        my %unsorth = map { $_ => 1 } @allcols;
 
         # clear sorted column list if just "order 0"
         if ((1 == scalar(@presortcols))
@@ -1077,8 +1020,7 @@ sub format_query_output
            {
               # remove all leading, trailing whitespace (changes sorting)
               # and whitespace around column separators
-              $line =~ s/^\s+//;
-              $line =~ s/\s+$//;
+              $line =~ s/^(\s+|\s+$)//;
               $line =~ s/\|\s+/\|/gm;
               $line =~ s/\s+\|/\|/gm;
 
@@ -1092,46 +1034,40 @@ sub format_query_output
 
         if ($glob_orderwarn)
         {
-            # if no ordering cols specified (no directive), and
-            # SELECT has ORDER BY, see if number of order
-            # by cols matches all cols in selected lists
-            if (exists($directive->{sql_statement})
-                && (defined($directive->{sql_statement}))
-                && ($directive->{sql_statement} =~ m/select.*order.*by/is))
+            # If no ordering cols specified (no directive), and SELECT has
+            # ORDER BY, see if number of order by cols matches all cols in
+            # selected lists. Treat the order by cols as a column separated
+            # list and count them. Works ok for simple ORDER BY clauses
+            if (defined($directive->{sql_statement}))
             {
-               my $fl2 = $directive->{firstline};
-               my $sql_statement = $directive->{sql_statement};
-               $sql_statement =~ s/\n/ /gm;
-               my @ocols =
-                   ($sql_statement =~ m/select.*order.*by\s+(.*)\;/is);
+                my @ocols = ($directive->{sql_statement} =~ m/select.*order\s+by\s+(.*)\;/ism);
 
-#               print Data::Dumper->Dump(\@ocols);
+                if (scalar(@ocols))
+                {
+                    my $fl2 = $directive->{firstline};
+                    # lines already have newline terminator, so just rejoin them.
+                    my $line2 = join ("", @{$outarr});
 
-               # lines already have newline terminator, so just rejoin them.
-               my $line2 = join ("", @{$outarr});
+                    my $ah2 = tablelizer($line2, $fl2);
+                    if (defined($ah2) && scalar(@{$ah2}))
+                    {
+                        my $allcol_count = scalar(keys(%{$ah2->[0]}));
 
-               my $ah2 = tablelizer($line2, $fl2);
-               my @allcols2;
+                        # In order to count the number of ORDER BY columns we
+                        # can transliterate over comma and increment by one to
+                        # account for the last column not having a trailing
+                        # comma. This is faster than splitting over the comma
+                        # since we don't need to allocate the returned array.
+                        my $ocol_count = ($ocols[0] =~ tr/,//) + 1;
 
-#               print Data::Dumper->Dump([$ah2]);
-
-               @allcols2 = (keys(%{$ah2->[0]}))
-                 if (defined($ah2) && scalar(@{$ah2}));
-
-               # treat the order by cols as a column separated list,
-               # and count them.  works ok for simple ORDER BY clauses
-               if (scalar(@ocols))
-               {
-                  my $ocolstr = shift @ocols;
-                  my @ocols2  = split (/\,/, $ocolstr);
-
-                  if (scalar(@ocols2) < scalar(@allcols2))
-                  {
-                     print "GP_IGNORE: ORDER_WARNING: OUTPUT ",
-                     scalar(@allcols2), " columns, but ORDER BY on ",
-                     scalar(@ocols2), " \n";
-                  }
-               }
+                        if ($ocol_count < $allcol_count)
+                        {
+                            print "GP_IGNORE: ORDER_WARNING: OUTPUT ",
+                            $allcol_count, " columns, but ORDER BY on ",
+                            $ocol_count, " \n";
+                        }
+                    }
+                }
             }
         } # end if $glob_orderwarn
 
@@ -1152,8 +1088,7 @@ sub format_query_output
            {
               # remove all leading, trailing whitespace (changes sorting)
               # and whitespace around column separators
-              $line =~ s/^\s+//;
-              $line =~ s/\s+$//;
+              $line =~ s/^(\s+|\s+$)//;
               $line =~ s/\|\s+/\|/gm;
               $line =~ s/\s+\|/\|/gm;
 
@@ -1226,11 +1161,12 @@ EOF_formatfix
         # look for match/substitution or match/ignore expressions
         if (defined($define_match_expression))
         {
-            unless (($ini =~ m/\-\-\s*end\_match(subs|ignore)\s*$/i))
+            unless (($ini =~ m/\-\-\s*end\_match(subs|ignore)\s*$/))
             {
                 $define_match_expression .= $ini;
                 goto L_push_outarr;
             }
+			my $match = $1;
 
             my @foo = split(/\n/, $define_match_expression, 2);
 
@@ -1248,7 +1184,7 @@ EOF_formatfix
             # strip off leading comment characters
             $doc1 =~ s/^\s*\-\-//gm;
 
-            if ($foo[0] =~ m/subs/)
+			if ($match eq 'subs')
             {
                 $stat = _build_match_subs($doc1, "USER");
             }
@@ -1276,42 +1212,35 @@ EOF_formatfix
 
         if ($big_ignore > 0)
         {
-            if (($ini =~ m/\-\-\s*end\_equiv\s*$/i) && !($do_equiv))
+            if (!$do_equiv && $ini =~ m/\-\-\s*end\_equiv\s*$/)
             {
-                $big_ignore -= 1;
+                $big_ignore--;
             }
-            if ($ini =~ m/\-\-\s*end\_ignore\s*$/i)
+            if ($ini =~ m/\-\-\s*end\_ignore\s*$/)
             {
-                $big_ignore -= 1;
+                $big_ignore--;
             }
             print $atmsort_outfh "GP_IGNORE:", $ini;
             next;
         }
-        elsif (($ini =~ m/\-\-\s*end\_equiv\s*$/i) && $do_equiv)
+        elsif ($do_equiv && $ini =~ m/\-\-\s*end\_equiv\s*$/)
         {
             $equiv_expected_rows = undef;
         }
 
-        if ($ini =~ m/\-\-\s*end\_head(er|ers|ing|ings)\_ignore\s*$/i)
-        {
-            $glob_ignore_headers = 0;
-        }
-
         if ($getrows) # getting rows from SELECT output
         {
-        # The end of "result set" for a COPY TO STDOUT is a bit tricky
-        # to find. There is no explicit marker for it. We look for a
-        # line that looks like a SQL comment or a new query, or an ERROR.
-        # This is not bullet-proof, but works for the current tests.
+            # The end of "result set" for a COPY TO STDOUT is a bit tricky
+            # to find. There is no explicit marker for it. We look for a
+            # line that looks like a SQL comment or a new query, or an ERROR.
+            # This is not bullet-proof, but works for the current tests.
             if ($copy_to_stdout_result &&
-                ($ini =~ m/\-\-/ ||
-                 $ini =~ m/ERROR/ ||
-         $ini =~ m/(copy)|(create)|(drop)|(select)|(insert)|(update)/i))
+                ($ini =~ m/(?:\-\-|ERROR|copy|create|drop|select|insert|update)/i))
             {
-                my @ggg= sort @outarr;
+                my @ggg = sort @outarr;
                 for my $line (@ggg)
                 {
-            print $atmsort_outfh $bpref, $line;
+                    print $atmsort_outfh $bpref, $line;
                 }
 
                 @outarr = ();
@@ -1319,23 +1248,23 @@ EOF_formatfix
                 $has_order = 0;
                 $copy_to_stdout_result = 0;
 
-        # Process the row again, in case it begins another
-        # COPY TO STDOUT statement, or another query.
-        goto reprocess_row;
+                # Process the row again, in case it begins another
+                # COPY TO STDOUT statement, or another query.
+                goto reprocess_row;
             }
 
             # regex example: (5 rows)
-            if ($ini =~ m/^\s*\(\d+\s+row(s)*\)\s*$/)
+            if ($ini =~ m/^\s*\(\d+\s+row(?:s)*\)\s*$/)
             {
                 format_query_output($glob_fqo,
                                     $has_order, \@outarr, $directive);
 
-
-                # Always ignore the rowcount for explain plan out as the skeleton plans might be the
-                # same even if the row counts differ because of session level GUCs.
+                # Always ignore the rowcount for explain plan out as the
+                # skeleton plans might be the same even if the row counts
+                # differ because of session level GUCs.
                 if (exists($directive->{explain}))
                 {
-                    $ini = "GP_IGNORE:" . $ini;
+                    $ini = 'GP_IGNORE:' . $ini;
                 }
 
                 $directive = {};
@@ -1346,13 +1275,18 @@ EOF_formatfix
         }
         else # finding SQL statement or start of SELECT output
         {
-            if (($ini =~ m/\-\-\s*start\_match(subs|ignore)\s*$/i))
+			# To avoid hunting for gpdiff commands which are contained inside
+			# comments first establish if the line contains a comment with any
+			# trailing characters at all.
+			my $has_comment = ((m/\s*\-\-.+$/) ? 1 : 0);
+
+            if ($has_comment && $ini =~ m/\-\-\s*start\_match(?:subs|ignore)\s*$/)
             {
                 $define_match_expression = $ini;
                 goto L_push_outarr;
             }
-            if (($ini =~ m/\-\-\s*start\_ignore\s*$/i) ||
-                (($ini =~ m/\-\-\s*start\_equiv\s*$/i) && !($do_equiv)))
+            if ($has_comment && (($ini =~ m/\-\-\s*start\_ignore\s*$/) ||
+                (!$do_equiv && ($ini =~ m/\-\-\s*start\_equiv\s*$/))))
             {
                 $big_ignore += 1;
 
@@ -1362,83 +1296,82 @@ EOF_formatfix
                 }
                 @outarr = ();
 
-                print $atmsort_outfh "GP_IGNORE:", $ini;
+                print $atmsort_outfh 'GP_IGNORE:', $ini;
                 next;
             }
-            elsif (($ini =~ m/\-\-\s*start\_equiv\s*$/i) &&
-                   $glob_make_equiv_expected)
+            elsif ($has_comment && ($glob_make_equiv_expected && $ini =~ m/\-\-\s*start\_equiv\s*$/))
             {
                 $equiv_expected_rows = [];
                 $directive->{make_equiv_expected} = 1;
             }
 
-            if ($ini =~ m/\-\-\s*start\_head(er|ers|ing|ings)\_ignore\s*$/i)
-            {
-                $glob_ignore_headers = 1;
-            }
-
             # Note: \d is for the psql "describe"
-            if ($ini =~ m/(insert|update|delete|select|\\d|copy)/i)
+            if ($ini =~ m/(?:insert|update|delete|select|\\d|copy)/i)
             {
                 $copy_to_stdout_result = 0;
                 $has_order = 0;
                 $sql_statement = "";
 
-                if ($ini =~ m/explain.*(insert|update|delete|select)/i)
+                if ($ini =~ m/explain.*(?:insert|update|delete|select)/i)
                 {
-                   $directive->{explain} = "normal";
+                    $directive->{explain} = 'normal';
                 }
-
             }
 
-            if ($ini =~ m/\-\-\s*force\_explain\s+operator.*$/i)
-            {
-                # ENGINF-137: force_explain
-                $directive->{explain} = "operator";
-            }
-            if ($ini =~ m/\-\-\s*force\_explain\s*$/i)
-            {
-                # ENGINF-137: force_explain
-                $directive->{explain} = "normal";
-            }
-            if ($ini =~ m/\-\-\s*ignore\s*$/i)
-            {
-                $directive->{ignore} = "ignore";
-            }
-            if ($ini =~ m/\-\-\s*order\s+\d+.*$/i)
-            {
-                my $olist = $ini;
-                $olist =~ s/^.*\-\-\s*order//;
-                $directive->{order} = $olist;
-            }
-            if ($ini =~ m/\-\-\s*mvd\s+\d+.*$/i)
-            {
-                my $olist = $ini;
-                $olist =~ s/^.*\-\-\s*mvd//;
-                $directive->{mvd} = $olist;
-            }
+			# Catching multiple commands and capturing the parens matches
+			# makes it possible to check just the first character since
+			# each command has a unique first character. This allows us to
+			# use fewer regular expression matches in this hot section.
+			if ($has_comment &&
+				$ini =~ m/\-\-\s*((force_explain)\s*(operator)?\s*$|(ignore)\s*$|(order)\s+\d+.*$|(mvd)\s+\d+.*$)/)
+			{
+				my $cmd = substr($1, 0, 1);
+				if ($cmd eq 'i')
+				{
+					$directive->{ignore} = 'ignore';
+				}
+				elsif ($cmd eq 'o')
+				{
+					my $olist = $ini;
+					$olist =~ s/^.*\-\-\s*order//;
+					$directive->{order} = $olist;
+				}
+				elsif ($cmd eq 'f')
+				{
+					if (defined($3))
+					{
+						$directive->{explain} = 'operator';
+					}
+					else
+					{
+						$directive->{explain} = 'normal';
+					}
+				}
+				else
+				{
+					my $olist = $ini;
+					$olist =~ s/^.*\-\-\s*mvd//;
+					$directive->{mvd} = $olist;
+				}
+			}
 
             if ($ini =~ m/select/i)
             {
                 $getstatement = 1;
-            }
-            if ($getstatement)
-            {
                 $sql_statement .= $ini;
             }
-            if ($ini =~ m/\;/) # statement terminator
+			if (index($ini, ';') != -1)
             {
                 $getstatement = 0;
             }
 
             # prune notices with segment info if they are duplicates
-#            if ($ini =~ m/^\s*(NOTICE|ERROR|HINT|DETAIL|WARNING)\:.*\s+\(seg.*pid.*\)/)
-            if ($ini =~ m/^\s*(NOTICE|ERROR|HINT|DETAIL|WARNING)\:/)
+            if ($ini =~ m/^\s*(?:NOTICE|ERROR|HINT|DETAIL|WARNING)\:/)
             {
-                $ini =~ s/\s+(\W)?(\W)?\(seg.*pid.*\)//;
+                $ini =~ s/\s+(?:\W)?(?:\W)?\(seg.*pid.*\)//;
 
                 # also remove line numbers from errors
-                $ini =~ s/\s+(\W)?(\W)?\(\w+\.[ch]:\d+\)/ (SOMEFILE:SOMEFUNC)/;
+                $ini =~ s/\s+(?:\W)?(?:\W)?\(\w+\.[ch]:\d+\)/ (SOMEFILE:SOMEFUNC)/;
                 my $outsize = scalar(@outarr);
 
                 my $lastguy = -1;
@@ -1456,7 +1389,7 @@ EOF_formatfix
 
                     # stop when no more notices
                     last L_checkfor
-                        if ($checkstr !~ m/^\s*(NOTICE|ERROR|HINT|DETAIL|WARNING)\:/);
+                        if ($checkstr !~ m/^\s*(?:NOTICE|ERROR|HINT|DETAIL|WARNING)\:/);
 
                     # discard this line if matches a previous notice
                     if ($skinny eq $checkstr)
@@ -1471,8 +1404,6 @@ EOF_formatfix
                     $lastguy--;
                 } # end for
 
-
-
             } # end if pruning notices
 
             # MPP-1492 allow:
@@ -1481,17 +1412,16 @@ EOF_formatfix
             # and special case these guys:
             #  copy test1 to stdout
             #  \copy test1 to stdout
-        my $matches_copy_to_stdout = 0;
-            if ($ini =~ m/^copy\s+((\(select.*\))|\w+)\s+to stdout.*;$/i ||
-                $ini =~ m/^\\copy\s+((\(select.*\))|\w+)\s+to stdout.*$/i)
+            my $matches_copy_to_stdout = 0;
+            if ($ini =~ m/^(?:\\)?copy\s+(?:(?:\(select.*\))|\w+)\s+to stdout.*$/i)
             {
-            $matches_copy_to_stdout = 1;
+                $matches_copy_to_stdout = 1;
             }
             # regex example: ---- or ---+---
             # need at least 3 dashes to avoid confusion with "--" comments
-            if (($ini =~ m/^\s*((\-\-)(\-)+(\+(\-)+)*)+\s*$/)
+            if (($matches_copy_to_stdout && $ini !~ m/order by/i) ||
+					$ini =~ m/^\s*(?:(?:\-\-)(?:\-)+(?:\+(?:\-)+)*)+\s*$/)
                 # special case for copy select
-                || ($matches_copy_to_stdout && ($ini !~ m/order\s+by/i)))
             { # sort this region
 
                 $directive->{firstline} = $outarr[-1];
@@ -1510,41 +1440,21 @@ EOF_formatfix
                 }
                 # special case for explain
                if (exists($directive->{explain}) &&
-                   ($ini =~ m/^\s*((\-\-)(\-)+(\+(\-)+)*)+\s*$/) &&
-                   ($outarr[-1] =~ m/QUERY PLAN/))
+                   ($ini =~ m/^\s*(?:(?:\-\-)(?:\-)+(?:\+(?:\-)+)*)+\s*$/) &&
+                   (scalar(@outarr) && $outarr[-1] =~ m/QUERY PLAN/))
                 {
-                   # ENGINF-88: fixup explain headers
-                   $outarr[-1] = "QUERY PLAN\n";
-                   $ini = ("_" x length($outarr[-1])) . "\n";
-
-                   if ($glob_ignore_headers)
-                   {
-                      $ini = "GP_IGNORE:" . $ini;
-                   }
+                    # ENGINF-88: fixup explain headers
+                    $outarr[-1] = "QUERY PLAN\n";
+                    $ini = ("_" x length($outarr[-1])) . "\n";
                 }
 
                 $getstatement = 0;
-
-                # ENGINF-180: ignore header formatting
-                # the last line of the outarr is the first line of the header
-                if ($glob_ignore_headers && $outarr[-1])
-                {
-                    $outarr[-1] = "GP_IGNORE:" . $outarr[-1];
-                }
 
                 for my $line (@outarr)
                 {
                     print $atmsort_outfh $apref, $line;
                 }
                 @outarr = ();
-
-                # ENGINF-180: ignore header formatting
-                # the current line is the last line of the header
-                if ($glob_ignore_headers
-                    && ($ini =~ m/^\s*((\-\-)(\-)+(\+(\-)+)*)+\s*$/))
-                {
-                    $ini = "GP_IGNORE:" . $ini;
-                }
 
                 print $atmsort_outfh $apref, $ini;
 
@@ -1554,65 +1464,58 @@ EOF_formatfix
                     && ($sql_statement =~ m/select.*order.*by/is))
                 {
                     $has_order = 1; # so do *not* sort output
-
-#                   $sql_statement =~ s/\n/ /gm;
-#                   print "has order: ", $sql_statement, "\n";
                     $directive->{sql_statement} = $sql_statement;
                 }
                 else
                 {
                     $has_order = 0; # need to sort query output
-
-#                    $sql_statement =~ s/\n/ /gm;
-#                    print "no order: ", $sql_statement, "\n";
                     $directive->{sql_statement} = $sql_statement;
                 }
-                $sql_statement = "";
+                $sql_statement = '';
 
                 $getrows = 1;
                 next;
             } # end sort this region
         } # end finding SQL
 
-
         # if MATCH then SUBSTITUTE
         # see HERE document for definitions
         $ini = match_then_subs($ini);
 
-        if ($ini =~ m/External table .*line (\d)+/)
+        if ($ini =~ m/External table .*line (?:\d)+/)
         {
             $ini =~ s/External table .*line (\d)+.*/External table DUMMY_EX, line DUMMY_LINE of DUMMY_LOCATION/;
-              $ini =~ s/\s+/ /;
-             # MPP-1557,AUTO-3: horrific ERROR DETAIL External Table trifecta
+            $ini =~ s/\s+/ /;
+            # MPP-1557,AUTO-3: horrific ERROR DETAIL External Table trifecta
             if ($glob_verbose)
             {
-                print $atmsort_outfh "GP_IGNORE: External Table ERROR DETAIL fixup\n";
+                print $atmsort_outfh 'GP_IGNORE: External Table ERROR DETAIL fixup' . "\n";
             }
-             if ($ini !~ m/^DETAIL/)
-             {
+            if ($ini !~ m/^DETAIL/)
+            {
                 # find a "blank" DETAIL tag preceding current line
                 if (scalar(@outarr) && ($outarr[-1] =~ m/^DETAIL:\s+$/))
                 {
-                   pop @outarr;
-                   $ini = "DETAIL: " . $ini;
-                   $ini =~ s/\s+/ /;
-                   # need to skip the next record
-                   $error_detail_exttab_trifecta_skip = 1;
+                    pop @outarr;
+                    $ini = "DETAIL: " . $ini;
+                    $ini =~ s/\s+/ /;
+                    # need to skip the next record
+                    $error_detail_exttab_trifecta_skip = 1;
                 }
-             }
-             if (scalar(@outarr) &&
-                 ($outarr[-1] =~ m/^ERROR:\s+missing\s+data\s+for\s+column/))
-             {
-                $outarr[-1] = "ERROR:  missing data for column DUMMY_COL\n";
-             }
+            }
 
+            if (scalar(@outarr) &&
+                ($outarr[-1] =~ m/^ERROR:\s+missing data for column/))
+            {
+                $outarr[-1] = 'ERROR:  missing data for column DUMMY_COL' . "\n";
+            }
         }
 
         # if MATCH then IGNORE
         # see HERE document for definitions
         if ( match_then_ignore($ini))
         {
-           next; # ignore matching lines
+            next; # ignore matching lines
         }
 
 L_push_outarr:

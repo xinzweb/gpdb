@@ -253,7 +253,7 @@ def get_table_data_to_file(filename, tablename, dbname):
     current_dir = os.getcwd()
     filename = os.path.join(current_dir, './gppylib/test/data', filename)
     order_sql = """
-                    select string_agg(a, ',')
+                    select string_agg(a::text, ',')
                         from (
                             select generate_series(1,c.relnatts+1) as a
                                 from pg_class as c
@@ -285,8 +285,10 @@ def get_table_data_to_file(filename, tablename, dbname):
 def diff_backup_restore_data(context, backup_file, restore_file):
     if not filecmp.cmp(backup_file, restore_file):
         raise Exception('%s and %s do not match' % (backup_file, restore_file))
-    
+
 def validate_restore_data(context, tablename, dbname, backedup_table=None):
+    if tablename == "public.gpcrondump_history":
+        return
     filename = tablename.strip() + "_restore"
     get_table_data_to_file(filename, tablename, dbname)
     current_dir = os.getcwd()
@@ -346,7 +348,7 @@ def check_table_exists(context, dbname, table_name, table_type=None, host=None, 
         SQL = """
               select c.oid, c.relkind, c.relstorage, c.reloptions
               from pg_class c, pg_namespace n
-              where c.relname = E'%s' and n.nspname = E'%s' and c.relnamespace = n.oid;
+              where c.relname = '%s' and n.nspname = '%s' and c.relnamespace = n.oid;
               """ % (pg.escape_string(tablename), pg.escape_string(schemaname))
     else:
         SQL = """

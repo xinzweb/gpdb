@@ -10,7 +10,7 @@
  */
 #include "postgres.h"
 
-#include "catalog/catquery.h"
+#include "access/htup.h"
 #include "catalog/pg_type.h"
 #include "nodes/execnodes.h" //SliceTable
 #include "cdb/cdbmotion.h"
@@ -174,16 +174,9 @@ InitSerTupInfo(TupleDesc tupdesc, SerTupInfo * pSerInfo)
 		{
 			HeapTuple	typeTuple;
 			Form_pg_type pt;
-			cqContext	*pcqCtx;
 
-			pcqCtx = caql_beginscan(
-					NULL,
-					cql("SELECT * FROM pg_type "
-						" WHERE oid = :1 ",
-						ObjectIdGetDatum(attrInfo->atttypid)));
-
-			typeTuple = caql_getnext(pcqCtx);
-
+			typeTuple = SearchSysCache1(TYPEOID,
+										ObjectIdGetDatum(attrInfo->atttypid));
 			if (!HeapTupleIsValid(typeTuple))
 				elog(ERROR, "cache lookup failed for type %u", attrInfo->atttypid);
 			pt = (Form_pg_type) GETSTRUCT(typeTuple);
@@ -225,10 +218,9 @@ InitSerTupInfo(TupleDesc tupdesc, SerTupInfo * pSerInfo)
 				attrInfo->typrecv  = pt->typreceive;
 				attrInfo->recv_typio_param = getTypeIOParam(typeTuple);
 			}
-			
-			caql_endscan(pcqCtx);
-		}
 
+			ReleaseSysCache(typeTuple);
+		}
 		
 		fmgr_info(attrInfo->typsend, &attrInfo->send_finfo);
 
@@ -444,7 +436,7 @@ SerializeTupleIntoChunks(HeapTuple tuple, SerTupInfo * pSerInfo, TupleChunkList 
 		addByteStringToChunkList(tcList, (char *)&tsh, sizeof(TupSerHeader), &pSerInfo->chunkCache);
 		/* If we don't have any attributes which have been toasted, we
 		 * can be very very simple: just send the raw data. */
-		if ((tsh.infomask & (HEAP_HASEXTERNAL | HEAP_HASEXTENDED)) == 0)
+		if ((tsh.infomask & HEAP_HASEXTERNAL) == 0)
 		{
 			if (nullslen)
 			{
@@ -749,7 +741,7 @@ SerializeTupleDirect(HeapTuple tuple, SerTupInfo * pSerInfo, struct directTransp
 			tsh.infomask = t_data->t_infomask;
 
 			if (dataSize + tsh.tuplen > b->prilen ||
-				(tsh.infomask & (HEAP_HASEXTERNAL | HEAP_HASEXTENDED)) != 0)
+				(tsh.infomask & HEAP_HASEXTERNAL) != 0)
 				return 0;
 
 			pos = b->pri + TUPLE_CHUNK_HEADER_SIZE;
@@ -1156,7 +1148,7 @@ CvtChunksToHeapTup(TupleChunkList tcList, SerTupInfo * pSerInfo)
 			pos += sizeof(TupSerHeader);	
 			/* if the tuple had toasted elements we have to deserialize
 			 * the old slow way. */
-			if ((tshp->infomask & (HEAP_HASEXTERNAL | HEAP_HASEXTENDED)) != 0)
+			if ((tshp->infomask & HEAP_HASEXTERNAL) != 0)
 			{
 				serData.cursor += sizeof(TupSerHeader);
 

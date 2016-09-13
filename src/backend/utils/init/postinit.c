@@ -8,7 +8,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/utils/init/postinit.c,v 1.174 2007/02/15 23:23:23 alvherre Exp $
+ *	  $PostgreSQL: pgsql/src/backend/utils/init/postinit.c,v 1.180.2.1 2008/09/11 14:01:35 alvherre Exp $
  *
  *
  *-------------------------------------------------------------------------
@@ -22,7 +22,6 @@
 #include "access/heapam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
-#include "catalog/catquery.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_database.h"
@@ -50,6 +49,7 @@
 #include "utils/flatfiles.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
+#include "utils/plancache.h"
 #include "utils/portal.h"
 #include "utils/ps_status.h"
 #include "utils/relcache.h"
@@ -281,7 +281,6 @@ PerformAuthentication(Port *port)
 static void
 ProcessRoleGUC(void)
 {
-	cqContext  *pcqCtx;
 	Oid			roleId;
 	HeapTuple	roleTup;
 	Datum		datum;
@@ -291,14 +290,8 @@ ProcessRoleGUC(void)
 	roleId = GetUserId();
 	Assert(OidIsValid(roleId));
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_authid "
-				" WHERE oid = :1",
-				ObjectIdGetDatum(roleId)));
-
-	roleTup = caql_getnext(pcqCtx);
-
+	roleTup = SearchSysCache1(AUTHOID,
+							  ObjectIdGetDatum(roleId));
 	if (!HeapTupleIsValid(roleTup))
 		ereport(FATAL,
 				(errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
@@ -308,16 +301,21 @@ ProcessRoleGUC(void)
 	 * Set up user-specific configuration variables.  This is a good place to
 	 * do it so we don't have to read pg_authid twice during session startup.
 	 */
-	datum = caql_getattr(pcqCtx,
-						 Anum_pg_authid_rolconfig, &isnull);
+	datum = SysCacheGetAttr(AUTHOID, roleTup,
+							Anum_pg_authid_rolconfig, &isnull);
 	if (!isnull)
 	{
 		ArrayType  *a = DatumGetArrayTypeP(datum);
 
-		ProcessGUCArray(a, PGC_S_USER);
+		/*
+		 * We process all the options at SUSET level.  We assume that the
+		 * right to insert an option into pg_authid was checked when it was
+		 * inserted.
+		 */
+		ProcessGUCArray(a, PGC_SUSET, PGC_S_USER, GUC_ACTION_SET);
 	}
 
-	caql_endscan(pcqCtx);
+	ReleaseSysCache(roleTup);
 }
 
 /*
@@ -429,7 +427,12 @@ CheckMyDatabase(const char *name, bool am_superuser)
 		{
 			ArrayType  *a = DatumGetArrayTypeP(datum);
 
-			ProcessGUCArray(a, PGC_S_DATABASE);
+			/*
+			 * We process all the options at SUSET level.  We assume that the
+			 * right to insert an option into pg_database was checked when it
+			 * was inserted.
+			 */
+			ProcessGUCArray(a, PGC_SUSET, PGC_S_DATABASE, GUC_ACTION_SET);
 		}
 	}
 
@@ -633,6 +636,7 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 	 */
 	RelationCacheInitialize();
 	InitCatalogCache();
+	InitPlanCache();
 
 	/* Initialize portal manager */
 	EnablePortalManager();
@@ -965,10 +969,6 @@ InitPostgres(const char *in_dbname, Oid dboid, const char *username,
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
 		addSharedSnapshot("Query Dispatcher", gp_session_id);
-	}
-	else if (Gp_role == GP_ROLE_DISPATCHAGENT)
-	{
-		SharedLocalSnapshotSlot = NULL;
 	}
     else if (Gp_segment == -1 && Gp_role == GP_ROLE_EXECUTE && !Gp_is_writer)
     {

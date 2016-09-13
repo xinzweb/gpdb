@@ -74,7 +74,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/executor/nodeAgg.c,v 1.150 2007/02/02 00:07:03 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/executor/nodeAgg.c,v 1.156.2.1 2008/10/16 19:25:58 neilc Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -82,7 +82,6 @@
 #include "postgres.h"
 
 #include "access/heapam.h"
-#include "catalog/catquery.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -944,7 +943,7 @@ find_unaggregated_cols_walker(Node *node, Bitmapset **colnos)
  * columns that haven't been explicitly grouped by.
  */
 List *
-get_agg_hash_collist(AggState *aggstate)
+find_hash_columns(AggState *aggstate)
 {
 	Agg		   *node = (Agg *) aggstate->ss.ps.plan;
 	Bitmapset  *colnos;
@@ -960,6 +959,8 @@ get_agg_hash_collist(AggState *aggstate)
 	collist = NIL;
 	while ((i = bms_first_member(colnos)) >= 0)
 		collist = lcons_int(i, collist);
+	bms_free(colnos);
+
 	return collist;
 }
 
@@ -1852,7 +1853,7 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 
 	if (node->aggstrategy == AGG_HASHED)
 	{
-		aggstate->hash_needed = get_agg_hash_collist(aggstate);
+		aggstate->hash_needed = find_hash_columns(aggstate);
 	}
 	else
 	{
@@ -1895,7 +1896,6 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 		Datum		textInitVal;
 		int			i;
 		ListCell   *lc;
-		cqContext  *pcqCtx;
 		
 		/* Planner should have assigned aggregate to correct level */
 		Assert(aggref->agglevelsup == 0);
@@ -1941,11 +1941,13 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 		Assert(!(aggref->aggdistinct && aggref->aggorder));
 		Assert(numArguments == 1 || !aggref->aggdistinct);
 
-		/* Get actual datatypes of the inputs.	These could be different from
-		 * the agg's declared input types, when the agg accepts ANY, ANYARRAY
-		 * or ANYELEMENT. The result will have argument types at 0 through 
-		 * numArguments-1 and sort key types mixed in or at numArguments through 
-		 * numInputs.
+		/*
+		 * Get actual datatypes of the inputs.	These could be different from
+		 * the agg's declared input types, when the agg accepts ANY or a
+		 * polymorphic type.
+		 *
+		 * The result will have argument types at 0 through numArguments-1 and
+		 * sort key types mixed in or at numArguments through numInputs.
 		 */
 		inputTypes = (Oid*)palloc0(sizeof(Oid)*(numInputs));
 		i = 0;
@@ -1955,14 +1957,9 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 			inputTypes[i++] = exprType((Node*)tle->expr);
 		}
 
-		pcqCtx = caql_beginscan(
-				NULL,
-				cql("SELECT * FROM pg_aggregate "
-					" WHERE aggfnoid = :1 ",
-					ObjectIdGetDatum(aggref->aggfnoid)));
-
-		aggTuple = caql_getnext(pcqCtx);
-
+		aggTuple = SearchSysCache(AGGFNOID,
+								  ObjectIdGetDatum(aggref->aggfnoid),
+								  0, 0, 0);
 		if (!HeapTupleIsValid(aggTuple))
 			elog(ERROR, "cache lookup failed for aggregate %u",
 				 aggref->aggfnoid);
@@ -2003,20 +2000,17 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 
 		/* Check that aggregate owner has permission to call component fns */
 		{
+			HeapTuple	procTuple;
 			Oid			aggOwner;
-			int			fetchCount;
 
-			aggOwner = caql_getoid_plus(
-					NULL,
-					&fetchCount,
-					NULL,
-					cql("SELECT proowner FROM pg_proc "
-						" WHERE oid = :1 ",
-						ObjectIdGetDatum(aggref->aggfnoid)));
-
-			if (!fetchCount)
+			procTuple = SearchSysCache(PROCOID,
+									   ObjectIdGetDatum(aggref->aggfnoid),
+									   0, 0, 0);
+			if (!HeapTupleIsValid(procTuple))
 				elog(ERROR, "cache lookup failed for function %u",
 					 aggref->aggfnoid);
+			aggOwner = ((Form_pg_proc) GETSTRUCT(procTuple))->proowner;
+			ReleaseSysCache(procTuple);
 
 			aclresult = pg_proc_aclcheck(transfn_oid, aggOwner,
 										 ACL_EXECUTE);
@@ -2086,11 +2080,11 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 
 		/*
 		 * initval is potentially null, so don't try to access it as a struct
-		 * field. Must do it the hard way with caql_getattr
+		 * field. Must do it the hard way with SysCacheGetAttr.
 		 */
-		textInitVal = caql_getattr(pcqCtx,
-								   Anum_pg_aggregate_agginitval,
-								   &peraggstate->initValueIsNull);
+		textInitVal = SysCacheGetAttr(AGGFNOID, aggTuple,
+									  Anum_pg_aggregate_agginitval,
+									  &peraggstate->initValueIsNull);
 
 		if (peraggstate->initValueIsNull)
 			peraggstate->initValue = (Datum) 0;
@@ -2248,7 +2242,7 @@ ExecInitAgg(Agg *node, EState *estate, int eflags)
 			fmgr_info(eqfunc, &peraggstate->equalfn);
 		}
 		
-		caql_endscan(pcqCtx);
+		ReleaseSysCache(aggTuple);
 	}
 
 	/*
@@ -2642,7 +2636,7 @@ Oid
 resolve_polymorphic_transtype(Oid aggtranstype, Oid aggfnoid,
 							  Oid *inputTypes)
 {
-	if (aggtranstype == ANYARRAYOID || aggtranstype == ANYELEMENTOID)
+	if (IsPolymorphicType(aggtranstype))
 	{
 		/* have to fetch the agg's declared input types... */
 		Oid		   *declaredArgTypes;
@@ -2652,7 +2646,8 @@ resolve_polymorphic_transtype(Oid aggtranstype, Oid aggfnoid,
 		aggtranstype = enforce_generic_type_consistency(inputTypes,
 														declaredArgTypes,
 														agg_nargs,
-														aggtranstype);
+														aggtranstype,
+														false);
 		pfree(declaredArgTypes);
 	}
 	return aggtranstype;

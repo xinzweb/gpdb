@@ -12,6 +12,8 @@
 #ifndef CODEGEN_WRAPPER_H_
 #define CODEGEN_WRAPPER_H_
 
+#include <stddef.h>
+
 #include "pg_config.h"
 #include "c.h"
 
@@ -26,8 +28,20 @@ typedef int64 Datum;
  */
 struct TupleTableSlot;
 struct ProjectionInfo;
+struct ExprContext;
+struct ExprState;
+struct PlanState;
+
+/*
+ * Enum used to mimic ExprDoneCond in ExecEvalExpr function pointer.
+ */
+typedef enum tmp_enum{
+	TmpResult
+}tmp_enum;
 
 typedef void (*ExecVariableListFn) (struct ProjectionInfo *projInfo, Datum *values, bool *isnull);
+typedef Datum (*ExecEvalExprFn) (struct ExprState *expression, struct ExprContext *econtext, bool *isNull, /*ExprDoneCond*/ tmp_enum *isDone);
+typedef Datum (*SlotGetAttrFn) (struct TupleTableSlot *slot, int attnum, bool *isnull);
 
 #ifndef USE_CODEGEN
 
@@ -36,6 +50,8 @@ typedef void (*ExecVariableListFn) (struct ProjectionInfo *projInfo, Datum *valu
 #define CodeGeneratorManagerGenerateCode(manager);
 #define CodeGeneratorManagerPrepareGeneratedFunctions(manager) 1
 #define CodeGeneratorManagerNotifyParameterChange(manager) 1
+#define CodeGeneratorManagerAccumulateExplainString(manager) 1
+#define CodeGeneratorManagerGetExplainString(manager) 1
 #define CodeGeneratorManagerDestroy(manager);
 #define GetActiveCodeGeneratorManager() NULL
 #define SetActiveCodeGeneratorManager(manager);
@@ -117,6 +133,19 @@ void
 CodeGeneratorManagerDestroy(void* manager);
 
 /*
+ * Accumulate the explain string with a dump of all the underlying LLVM modules
+ */
+void
+CodeGeneratorManagerAccumulateExplainString(void* manager);
+
+/*
+ * Return a copy in CurrentMemoryContext of the previously accumulated explain
+ * string
+ */
+char*
+CodeGeneratorManagerGetExplainString(void* manager);
+
+/*
  * Get the active code generator manager
  */
 void*
@@ -136,6 +165,16 @@ ExecVariableListCodegenEnroll(ExecVariableListFn regular_func_ptr,
                               ExecVariableListFn* ptr_to_regular_func_ptr,
                               struct ProjectionInfo* proj_info,
                               struct TupleTableSlot* slot);
+
+/*
+ * Enroll and returns the pointer to ExecEvalExprGenerator
+ */
+void*
+ExecEvalExprCodegenEnroll(ExecEvalExprFn regular_func_ptr,
+                          ExecEvalExprFn* ptr_to_regular_func_ptr,
+                          struct ExprState *exprstate,
+                          struct ExprContext *econtext,
+                          struct PlanState* plan_state);
 
 #ifdef __cplusplus
 }  // extern "C"
@@ -195,6 +234,11 @@ ExecVariableListCodegenEnroll(ExecVariableListFn regular_func_ptr,
 		proj_info->ExecVariableList_gen_info.code_generator = ExecVariableListCodegenEnroll( \
 				regular_func, ptr_to_regular_func_ptr, proj_info, slot); \
 		Assert(proj_info->ExecVariableList_gen_info.ExecVariableList_fn == regular_func); \
+
+#define enroll_ExecEvalExpr_codegen(regular_func, ptr_to_regular_func_ptr, exprstate, econtext, plan_state) \
+		exprstate->ExecEvalExpr_code_generator = ExecEvalExprCodegenEnroll( \
+        (ExecEvalExprFn)regular_func, (ExecEvalExprFn*)ptr_to_regular_func_ptr, exprstate, econtext, plan_state); \
+        Assert(exprstate->evalfunc == regular_func); \
 
 #endif //USE_CODEGEN
 

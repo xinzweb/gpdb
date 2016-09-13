@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/nodes/readfuncs.h,v 1.23 2007/01/05 22:19:56 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/nodes/readfuncs.h,v 1.24 2008/01/01 19:45:58 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -39,17 +39,6 @@ nodeReadSkip(void);
  */
 bool
 pg_strtok_peek_fldname(const char *fldname);
-
-/*
- * pg_strtok_prereq
- *    If the next tokens to be returned by pg_strtok are, case-sensitively,
- *          :prereq <featurename>
- *    then this function consumes them and returns true.  Otherwise false
- *    is returned and no tokens are consumed.
- */
-bool
-pg_strtok_prereq(const char *featurename);
-
 
 /*-------------------------------------------------------------------------
  * prototypes for functions in readfuncs.c

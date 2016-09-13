@@ -22,13 +22,9 @@
 #include "cdb/cdbpartition.h"
 #include "parser/parsetree.h"
 #include "access/genam.h"
-#include "catalog/catquery.h"
 #include "nodes/nodeFuncs.h"
 #include "utils/memutils.h"
 #include "cdb/cdbvars.h"
-
-/* Number of slots required for DynamicIndexScan */
-#define DYNAMICINDEXSCAN_NSLOTS 2
 
 /*
  * Free resources from a partition.
@@ -38,11 +34,14 @@ CleanupOnePartition(IndexScanState *indexState);
 
 /*
  * Account for the number of tuple slots required for DynamicIndexScan
+ *
+ * XXX: We have backported the PostgreSQL patch that made these functions
+ * obsolete. The returned value isn't used for anything, so just return 0.
  */
 int 
 ExecCountSlotsDynamicIndexScan(DynamicIndexScan *node)
 {
-	return DYNAMICINDEXSCAN_NSLOTS;
+	return 0;
 }
 
 /*
@@ -142,8 +141,8 @@ static bool
 initNextIndexToScan(DynamicIndexScanState *node)
 {
 	IndexScanState *indexState = &(node->indexScanState);
-
 	DynamicIndexScan *dynamicIndexScan = (DynamicIndexScan *)node->indexScanState.ss.ps.plan;
+	EState *estate = indexState->ss.ps.state;
 
 	/* Load new index when the scanning of the previous index is done. */
 	if (indexState->ss.scan_state == SCAN_INIT ||
@@ -174,33 +173,29 @@ initNextIndexToScan(DynamicIndexScanState *node)
 		 * We started at table level, and now we are fetching the oid of an index
 		 * partition.
 		 */
-		Oid pindex = getPhysicalIndexRelid(dynamicIndexScan->logicalIndexInfo,
-					 *pid);
-
-		Assert(OidIsValid(pindex));
-
 		Relation currentRelation = OpenScanRelationByOid(*pid);
 		indexState->ss.ss_currentRelation = currentRelation;
 
-		for (int i=0; i < DYNAMICINDEXSCAN_NSLOTS; i++)
-		{
-			indexState->ss.ss_ScanTupleSlot[i].tts_tableOid = *pid;
-		}
+		indexState->ss.ss_ScanTupleSlot->tts_tableOid = *pid;
 
 		ExecAssignScanType(&indexState->ss, RelationGetDescr(currentRelation));
 
-		ScanState *scanState = (ScanState *)node;
+		/*
+		 * Initialize result tuple type and projection info.
+		 */
+		ExecAssignResultTypeFromTL(&indexState->ss.ps);
+		ExecAssignScanProjectionInfo(&indexState->ss);
 
 		MemoryContextReset(node->partitionMemoryContext);
 		MemoryContext oldCxt = MemoryContextSwitchTo(node->partitionMemoryContext);
 
 		/* Initialize child expressions */
-		scanState->ps.qual = (List *)ExecInitExpr((Expr *)scanState->ps.plan->qual, (PlanState*)scanState);
-		scanState->ps.targetlist = (List *)ExecInitExpr((Expr *)scanState->ps.plan->targetlist, (PlanState*)scanState);
+		indexState->ss.ps.qual = (List *) ExecInitExpr((Expr *) indexState->ss.ps.plan->qual, (PlanState *) indexState);
+		indexState->ss.ps.targetlist = (List *) ExecInitExpr((Expr *) indexState->ss.ps.plan->targetlist, (PlanState *) indexState);
 
-		ExecAssignScanProjectionInfo(scanState);
+		Oid pindex = getPhysicalIndexRelid(currentRelation, dynamicIndexScan->logicalIndexInfo);
 
-		EState *estate = indexState->ss.ps.state;
+		Assert(OidIsValid(pindex));
 
 		indexState->iss_RelationDesc =
 			OpenIndexRelation(estate, pindex, *pid);
@@ -222,28 +217,13 @@ initNextIndexToScan(DynamicIndexScanState *node)
 
 		MemoryContextSwitchTo(oldCxt);
 
-		ExprContext *econtext = indexState->iss_RuntimeContext;		/* context for runtime keys */
-
 		if (indexState->iss_NumRuntimeKeys != 0)
 		{
-			ExecIndexEvalRuntimeKeys(econtext,
+			ExecIndexEvalRuntimeKeys(indexState->iss_RuntimeContext,
 									 indexState->iss_RuntimeKeys,
 									 indexState->iss_NumRuntimeKeys);
 		}
-
 		indexState->iss_RuntimeKeysReady = true;
-
-		/*
-		 * Initialize result tuple type and projection info.
-		 */
-		TupleDesc td = indexState->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor;
-		if (td)
-		{
-			pfree(td);
-			td = NULL;
-		}
-		ExecAssignResultTypeFromTL(&indexState->ss.ps);
-		ExecAssignScanProjectionInfo(&indexState->ss);
 
 		indexState->iss_ScanDesc = index_beginscan(currentRelation,
 				indexState->iss_RelationDesc,

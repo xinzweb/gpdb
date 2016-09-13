@@ -10,7 +10,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/optimizer/util/plancat.c,v 1.132 2007/01/20 23:13:01 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/optimizer/util/plancat.c,v 1.140.2.1 2008/04/01 00:48:44 tgl Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -19,8 +19,9 @@
 #include <math.h>
 
 #include "access/genam.h"
-#include "catalog/catquery.h"
 #include "access/heapam.h"
+#include "access/transam.h"
+#include "catalog/pg_appendonly_fn.h"
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_exttable.h"
 #include "commands/tablecmds.h"
@@ -44,10 +45,15 @@
 
 
 /* GUC parameter */
+bool		constraint_exclusion = false;
+
+/* Hook for plugins to get control in get_relation_info() */
+get_relation_info_hook_type get_relation_info_hook = NULL;
+
 
 static List *get_relation_constraints(PlannerInfo *root,
-									  Oid relationObjectId, RelOptInfo *rel,
-									  bool include_notnull);
+						 Oid relationObjectId, RelOptInfo *rel,
+						 bool include_notnull);
 
 static void
 estimate_tuple_width(Relation   rel,
@@ -66,6 +72,9 @@ cdb_estimate_rel_size(RelOptInfo   *relOptInfo,
 
 static void
 cdb_default_stats_warning_for_index(Oid reloid, Oid indexoid);
+
+static void get_external_relation_info(Relation relation, RelOptInfo *rel);
+
 
 /*
  * get_relation_info -
@@ -121,25 +130,30 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
      */
     rel->cdbpolicy = RelationGetPartitioningKey(relation);
 
-    /*
-     * Estimate relation size --- unless it's an inheritance parent, in which
-     * case the size will be computed later in set_append_rel_pathlist, and we
-     * must leave it zero for now to avoid bollixing the total_table_pages
-     * calculation.
-     */
-     if (!inhparent)
-     {
-    	cdb_estimate_rel_size
-    		(
-    		rel,
-    		relation,
-    		relation,
-    		rel->attr_widths - rel->min_attr,
-    		&rel->pages,
-    		&rel->tuples,
-    		&rel->cdb_default_stats_used
-    		);
-     }
+	rel->relstorage = relation->rd_rel->relstorage;
+
+	/* If it's an external table, get locations and format from catalog */
+	if (rel->relstorage == RELSTORAGE_EXTERNAL)
+		get_external_relation_info(relation, rel);
+
+	/*
+	 * Estimate relation size --- unless it's an inheritance parent, in which
+	 * case the size will be computed later in set_append_rel_pathlist, and we
+	 * must leave it zero for now to avoid bollixing the total_table_pages
+	 * calculation.
+	 */
+	if (!inhparent)
+	{
+		cdb_estimate_rel_size(
+			rel,
+			relation,
+			relation,
+			rel->attr_widths - rel->min_attr,
+			&rel->pages,
+			&rel->tuples,
+			&rel->cdb_default_stats_used
+			);
+	}
 
 	/*
 	 * Make list of indexes.  Ignore indexes on system catalogs if told to.
@@ -195,10 +209,25 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			 * Ignore invalid indexes, since they can't safely be used for
 			 * queries.  Note that this is OK because the data structure we
 			 * are constructing is only used by the planner --- the executor
-			 * still needs to insert into "invalid" indexes!
+			 * still needs to insert into "invalid" indexes, if they're marked
+			 * IndexIsReady.
 			 */
-			if (!index->indisvalid)
+			if (!IndexIsValid(index))
 			{
+				index_close(indexRelation, NoLock);
+				continue;
+			}
+
+			/*
+			 * If the index is valid, but cannot yet be used, ignore it; but
+			 * mark the plan we are generating as transient. See
+			 * src/backend/access/heap/README.HOT for discussion.
+			 */
+			if (index->indcheckxmin &&
+				!TransactionIdPrecedes(HeapTupleHeaderGetXmin(indexRelation->rd_indextuple->t_data),
+									   TransactionXmin))
+			{
+				root->glob->transientPlan = true;
 				index_close(indexRelation, NoLock);
 				continue;
 			}
@@ -210,25 +239,29 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			info->ncolumns = ncolumns = index->indnatts;
 
 			/*
-			 * Need to make opfamily array large enough to put a terminating
-			 * zero at the end.
+			 * Allocate per-column info arrays.  To save a few palloc cycles
+			 * we allocate all the Oid-type arrays in one request.	Note that
+			 * the opfamily array needs an extra, terminating zero at the end.
+			 * We pre-zero the ordering info in case the index is unordered.
 			 */
 			info->indexkeys = (int *) palloc(sizeof(int) * ncolumns);
-			info->opfamily = (Oid *) palloc0(sizeof(Oid) * (ncolumns + 1));
-			/* initialize these to zeroes in case index is unordered */
-			info->fwdsortop = (Oid *) palloc0(sizeof(Oid) * ncolumns);
-			info->revsortop = (Oid *) palloc0(sizeof(Oid) * ncolumns);
+			info->opfamily = (Oid *) palloc0(sizeof(Oid) * (4 * ncolumns + 1));
+			info->opcintype = info->opfamily + (ncolumns + 1);
+			info->fwdsortop = info->opcintype + ncolumns;
+			info->revsortop = info->fwdsortop + ncolumns;
 			info->nulls_first = (bool *) palloc0(sizeof(bool) * ncolumns);
 
 			for (i = 0; i < ncolumns; i++)
 			{
-				info->opfamily[i] = indexRelation->rd_opfamily[i];
 				info->indexkeys[i] = index->indkey.values[i];
+				info->opfamily[i] = indexRelation->rd_opfamily[i];
+				info->opcintype[i] = indexRelation->rd_opcintype[i];
 			}
 
 			info->relam = indexRelation->rd_rel->relam;
 			info->amcostestimate = indexRelation->rd_am->amcostestimate;
 			info->amoptionalkey = indexRelation->rd_am->amoptionalkey;
+			info->amsearchnulls = indexRelation->rd_am->amsearchnulls;
 
 			/*
 			 * Fetch the ordering operators associated with the index, if any.
@@ -241,9 +274,9 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 
 				for (i = 0; i < ncolumns; i++)
 				{
-					int16	opt = indexRelation->rd_indoption[i];
-					int		fwdstrat;
-					int		revstrat;
+					int16		opt = indexRelation->rd_indoption[i];
+					int			fwdstrat;
+					int			revstrat;
 
 					if (opt & INDOPTION_DESC)
 					{
@@ -255,10 +288,11 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 						fwdstrat = BTLessStrategyNumber;
 						revstrat = BTGreaterStrategyNumber;
 					}
+
 					/*
-					 * Index AM must have a fixed set of strategies for it
-					 * to make sense to specify amcanorder, so we
-					 * need not allow the case amstrategies == 0.
+					 * Index AM must have a fixed set of strategies for it to
+					 * make sense to specify amcanorder, so we need not allow
+					 * the case amstrategies == 0.
 					 */
 					if (fwdstrat > 0)
 					{
@@ -323,31 +357,35 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	rel->indexlist = indexinfos;
 
 	heap_close(relation, NoLock);
+
+	/*
+	 * Allow a plugin to editorialize on the info we obtained from the
+	 * catalogs.  Actions might include altering the assumed relation size,
+	 * removing an index, or adding a hypothetical index to the indexlist.
+	 */
+	if (get_relation_info_hook)
+		(*get_relation_info_hook) (root, relationObjectId, inhparent, rel);
 }
 
 /*
  * Update RelOptInfo to include the external specifications (file URI list
  * and data format) from the pg_exttable catalog.
  */
-void
-get_external_relation_info(Oid relationObjectId, RelOptInfo *rel)
+static void
+get_external_relation_info(Relation relation, RelOptInfo *rel)
 {
-
-	Relation	pg_class_rel;
-	ExtTableEntry* extentry;
+	ExtTableEntry *extentry;
 
 	/*
      * Get partitioning key info for distributed relation.
      */
-	pg_class_rel = heap_open(relationObjectId, NoLock);
-	rel->cdbpolicy = RelationGetPartitioningKey(pg_class_rel);
-	heap_close(pg_class_rel, NoLock);
+	rel->cdbpolicy = RelationGetPartitioningKey(relation);
 
 	/*
 	 * Get the pg_exttable fields for this table
 	 */
-	extentry = GetExtTableEntry(relationObjectId);
-	
+	extentry = GetExtTableEntry(RelationGetRelid(relation));
+
 	rel->locationlist = extentry->locations;	
 	rel->execcommand = extentry->command;
 	rel->fmttype = extentry->fmtcode;
@@ -357,7 +395,6 @@ get_external_relation_info(Oid relationObjectId, RelOptInfo *rel)
 	rel->fmterrtbl = extentry->fmterrtbl;
 	rel->ext_encoding = extentry->encoding;
 	rel->writable = extentry->iswritable;
-
 }
 
 /*
@@ -503,8 +540,7 @@ estimate_rel_size(Relation rel, int32 *attr_widths,
 				
 				int					nsegs, i , j;
 				double				totalBytes = 0;
-				AppendOnlyEntry*	aoEntry = GetAppendOnlyEntry(RelationGetRelid(rel), SnapshotNow);
-				AOCSFileSegInfo**	aocsInfo = GetAllAOCSFileSegInfo(rel, aoEntry, SnapshotNow, &nsegs);
+				AOCSFileSegInfo**	aocsInfo = GetAllAOCSFileSegInfo(rel, SnapshotNow, &nsegs);
 				
 			    if (aocsInfo)
 			    {
@@ -519,7 +555,6 @@ estimate_rel_size(Relation rel, int32 *attr_widths,
 			    	}
 			    }
 			    curpages = RelationGuessNumberOfBlocks(totalBytes);
-			    pfree(aoEntry);
 			}
 			else
 			{
@@ -773,9 +808,13 @@ get_relation_constraints(PlannerInfo *root,
  * Detect whether the relation need not be scanned because it has either
  * self-inconsistent restrictions, or restrictions inconsistent with the
  * relation's CHECK constraints.
+ *
+ * Note: this examines only rel->relid and rel->baserestrictinfo; therefore
+ * it can be called before filling in other fields of the RelOptInfo.
  */
 bool
-relation_excluded_by_constraints(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
+relation_excluded_by_constraints(PlannerInfo *root,
+								 RelOptInfo *rel, RangeTblEntry *rte)
 {
 	List	   *safe_restrictions;
 	List	   *constraint_pred;
@@ -897,7 +936,7 @@ build_physical_tlist(PlannerInfo *root, RelOptInfo *rel)
 {
 	List	   *tlist = NIL;
 	Index		varno = rel->relid;
-	RangeTblEntry *rte = rt_fetch(varno, root->parse->rtable);
+	RangeTblEntry *rte = planner_rt_fetch(varno, root);
 	Relation	relation;
 	Query	   *subquery;
 	Var		   *var;
@@ -1119,9 +1158,11 @@ List *
 find_inheritance_children(Oid inhparent)
 {
 	List	   *list = NIL;
+	Relation	relation;
+	HeapScanDesc scan;
 	HeapTuple	inheritsTuple;
 	Oid			inhrelid;
-	cqContext  *pcqCtx;
+	ScanKeyData key[1];
 	ListCell   *item;
 	int         i;
 	Oid        *ordered_list;
@@ -1133,18 +1174,19 @@ find_inheritance_children(Oid inhparent)
 	if (!has_subclass_fast(inhparent))
 		return NIL;
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_inherits "
-				" WHERE inhparent = :1 ",
-				ObjectIdGetDatum(inhparent)));
-
-	while (HeapTupleIsValid(inheritsTuple = caql_getnext(pcqCtx)))
+	ScanKeyInit(&key[0],
+				Anum_pg_inherits_inhparent,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(inhparent));
+	relation = heap_open(InheritsRelationId, AccessShareLock);
+	scan = heap_beginscan(relation, SnapshotNow, 1, key);
+	while ((inheritsTuple = heap_getnext(scan, ForwardScanDirection)) != NULL)
 	{
 		inhrelid = ((Form_pg_inherits) GETSTRUCT(inheritsTuple))->inhrelid;
 		list = lappend_oid(list, inhrelid);
 	}
-	caql_endscan(pcqCtx);
+	heap_endscan(scan);
+	heap_close(relation, AccessShareLock);
 
 	/*
 	 * The order in which child OIDs are scanned on master may not be

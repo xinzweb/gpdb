@@ -3,10 +3,10 @@
 # GNUmakefile--
 #    Makefile for src/test/regress (the regression tests)
 #
-# Portions Copyright (c) 1996-2007, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
-# $PostgreSQL: pgsql/src/test/regress/GNUmakefile,v 1.68 2007/06/12 11:07:32 mha Exp $
+# $PostgreSQL: pgsql/src/test/regress/GNUmakefile,v 1.71 2008/01/01 19:46:00 momjian Exp $
 #
 #-------------------------------------------------------------------------
 
@@ -19,9 +19,14 @@ contribdir = $(top_builddir)/contrib
 # port number for temp-installation test postmaster
 TEMP_PORT = 5$(DEF_PGPORT)
 
+# file with extra config for temp build
+TEMP_CONF =
+ifdef TEMP_CONFIG
+TEMP_CONF += --temp-config=$(TEMP_CONFIG)
+endif
+
 # Greenplum regression tests use $PGPORT
 PGPORT?=15432
-
 
 # where to find psql for testing an existing installation
 PSQLDIR = $(bindir)
@@ -93,7 +98,7 @@ uninstall:
 # Build dynamically-loaded object file for CREATE FUNCTION ... LANGUAGE C.
 
 NAME = regress
-OBJS = regress.o caqltest.o partindex.o
+OBJS = regress.o partindex.o
 
 include $(top_srcdir)/src/Makefile.shlib
 
@@ -112,7 +117,7 @@ bb_output_files := $(foreach file, $(bb_ofile_list), bugbuster/expected/$(file).
 
 
 ifneq ($(PORTNAME),win32)
-abs_srcdir := $(shell cd $(srcdir) && pwd)
+abs_srcdir := $(shell cd "$(srcdir)" && pwd)
 abs_builddir := $(shell pwd)
 else
 abs_srcdir := $(shell cd $(srcdir) && pwd -W)
@@ -158,15 +163,14 @@ includecheck:
 ## Run tests
 ##
 
-## To load a procedural language use "--load-language=..."
-
 pg_regress_call = ./pg_regress --inputdir=$(srcdir) --multibyte=$(MULTIBYTE) $(MAXCONNOPT) $(NOLOCALE) --init-file=$(srcdir)/init_file
 pg_regress_call_bb = ./pg_regress --inputdir=$(srcdir)/bugbuster --outputdir=$(srcdir)/bugbuster --multibyte=$(MULTIBYTE) $(MAXCONNOPT) $(NOLOCALE) --init-file=$(srcdir)/init_file
+pg_regress_call_opt = ./pg_regress --inputdir=$(srcdir)/optfunctional --outputdir=$(srcdir)/optfunctional --multibyte=$(MULTIBYTE) $(MAXCONNOPT) $(NOLOCALE) --init-file=$(srcdir)/optfunctional/init_file
 
-check: all upg2-setup ugpart-setup
+check: all
 	$(pg_regress_call) --temp-install=./tmp_check --top-builddir=$(top_builddir) --srcdir=$(abs_srcdir) --temp-port=$(TEMP_PORT) --schedule=$(srcdir)/parallel_schedule 
 
-installcheck: all upg2-setup ugpart-setup
+installcheck: all
 	$(pg_regress_call)  --psqldir=$(PSQLDIR) --schedule=$(srcdir)/serial_schedule --srcdir=$(abs_srcdir)
 
 installcheck-good: all
@@ -176,6 +180,13 @@ installcheck-good: all
 	bash kerberos/setup_test.sh; \
 	PGUSER="gpadmin/kerberos-test" $(pg_regress_call)  --psqldir=$(PSQLDIR) --schedule=$(srcdir)/parallel_schedule --schedule=$(srcdir)/greenplum_schedule --srcdir=$(abs_srcdir) --host=`hostname`; \
 	fi
+
+installcheck-optfunctional: all
+	@echo "================================"
+	@echo "Installcheck-optfunctional starting ... "
+	@echo "================================"
+	export PGOPTIONS='-c optimizer=on' && \
+	$(pg_regress_call_opt) --psqldir=$(PSQLDIR) --schedule=$(srcdir)/optfunctional/optfunctional_schedule --srcdir=$(abs_srcdir)/optfunctional
 
 testbouncer: all
 	bash -c "bouncer/setup.sh"
@@ -196,30 +207,6 @@ installcheck-bugbuster: all
 
 $(srcdir)/sql/orca_udfs.sql: $(srcdir)/sql/orca_udfs.sql.in
 	sed -e 's,%%GPOPTUTILS_NAMESPACE%%,orcaudftest,g; s,%%EXT%%,$(LDSFX),g' $(srcdir)/sql/orca_udfs.sql.in > $(srcdir)/sql/orca_udfs.sql
-
-# Copy and transform all of the upgrade related data files
-# For upgrade installcheck-good test, we need to get rid of
-# 1. WITH clause (because create table doesn't like tidycat definition)
-# 2. tablespace pg_global
-# 3. (oid=...)
-upg2-setup:
-	rm -rf data/upg_catupgrade_43.sql
-	perl -pi \
-		-e 's/(, )?(indexid|relid|reltype_oid|toast_oid|toast_index|toast_relid|toast_reltype|shared|CamelCase)=[0-9a-zA-Z]+//gi;' \
-		-e 's/oid=false//g;' \
-		-e 's/with \([^a-zA-Z]*\)//g;' \
-		-e 's/\(oid=[0-9]+\)//;' \
-		-e 's/tablespace pg_global//g;' \
-		-e 's/oids=true, /oids=true/;' \
-		-e 's/\(,/(/;' \
-		< $(srcdir)/data/upgrade43/upg2_catupgrade_43.sql.in \
-		> data/upg_catupgrade_43.sql
-	@gpstringsubs.pl data/upg_catupgrade_43.sql
-
-ugpart-setup:
-	@cp -f $(srcdir)/data/upgrade_pg_partitions.sql.in data/upgrade_pg_partitions.sql
-	@gpstringsubs.pl data/upgrade_pg_partitions.sql	
-
 
 # old interfaces follow...
 
@@ -261,11 +248,7 @@ clean distclean maintainer-clean: clean-lib
 	rm -f regression.diffs regression.out regress.out run_check.out
 	rm -f bugbuster/regression.diffs bugbuster/regression.out
 	rm -f data/pg_class32.data
-	rm -f input/loadcat33.source
-	rm -f input/loadcat34.source
-	rm -f input/loadcat34_sh.source
 	rm -f gmon.out
-	rm -f $(upg2_temp_files)
 	rm -f $(srcdir)/sql/cppudf.sql
 ifeq ($(PORTNAME), cygwin)
 	rm -f regress.def

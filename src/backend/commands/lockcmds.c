@@ -8,7 +8,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/commands/lockcmds.c,v 1.16 2007/01/05 22:19:26 momjian Exp $
+ *	  $PostgreSQL: pgsql/src/backend/commands/lockcmds.c,v 1.17 2008/01/01 19:45:49 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -78,6 +78,10 @@ LockTableCommand(LockStmt *lockstmt)
 
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
-		CdbDispatchUtilityStatement((Node *) lockstmt, "LockTableCommand");
+		CdbDispatchUtilityStatement((Node *) lockstmt,
+									DF_CANCEL_ON_ERROR|
+									DF_WITH_SNAPSHOT|
+									DF_NEED_TWO_PHASE,
+									NULL);
 	}
 }

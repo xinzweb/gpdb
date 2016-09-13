@@ -10,13 +10,18 @@
  *		reduce_outer_joins
  *
  *
+ * In PostgreSQL, there is code here to do with pulling up "simple UNION ALLs".
+ * In GPDB, there is no such thing as a simple UNION ALL as locus of the relations
+ * may be different, so all that has been removed.
+ *
+ *
  * Portions Copyright (c) 2006-2008, Greenplum inc
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/optimizer/prep/prepjointree.c,v 1.47 2007/02/19 07:03:30 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/optimizer/prep/prepjointree.c,v 1.49.2.1 2008/08/14 20:31:59 heikki Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -61,7 +66,7 @@ static void reduce_outer_joins_pass2(Node *jtnode,
 						 Relids nonnullable_rels);
 static void fix_in_clause_relids(List *in_info_list, int varno,
 					 Relids subrelids);
-static void fix_append_rel_relids(List *append_rel_list, Index varno,
+static void fix_append_rel_relids(List *append_rel_list, int varno,
 					  Relids subrelids);
 static Node *find_jointree_node_for_rel(Node *jtnode, int relid);
 
@@ -683,6 +688,7 @@ is_simple_subquery(PlannerInfo *root, Query *subquery)
 	 */
 	if (!IsA(subquery, Query) ||
 		subquery->commandType != CMD_SELECT ||
+		subquery->utilityStmt != NULL ||
 		subquery->intoClause != NULL)
 		elog(ERROR, "subquery is bogus");
 
@@ -1209,7 +1215,7 @@ fix_in_clause_relids(List *in_info_list, int varno, Relids subrelids)
  * We assume we may modify the AppendRelInfo nodes in-place.
  */
 static void
-fix_append_rel_relids(List *append_rel_list, Index varno, Relids subrelids)
+fix_append_rel_relids(List *append_rel_list, int varno, Relids subrelids)
 {
 	ListCell   *l;
 	int			subvarno = -1;

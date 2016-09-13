@@ -549,6 +549,10 @@ SELECT user_relns() AS user_relns
  equipment_r
  f_star
  fast_emp4000
+ fkc_foreign_table1
+ fkc_foreign_table2
+ fkc_primary_table1
+ fkc_primary_table2
  float4_tbl
  float8_tbl
  floats
@@ -606,6 +610,7 @@ SELECT user_relns() AS user_relns
  interval_tbl
  iportaltest
  lseg_tbl
+ money_data
  num_data
  num_exp_add
  num_exp_div
@@ -640,6 +645,7 @@ SELECT user_relns() AS user_relns
  tab2
  tenk1
  tenk2
+ test_tsvector
  text_tbl
  time_tbl
  timestamp_tbl
@@ -649,7 +655,7 @@ SELECT user_relns() AS user_relns
  toyemp
  usr_define_type
  varchar_tbl
-(145 rows)
+(151 rows)
 
 SELECT name(equipment(hobby_construct(text 'skywalking', text 'mer')));
  name 

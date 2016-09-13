@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_constraint.h,v 1.25 2007/02/14 01:58:58 tgl Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_constraint.h,v 1.27 2008/01/17 18:56:54 tgl Exp $
  *
  * NOTES
  *	  the genbki.sh script reads this file and generates .bki
@@ -22,44 +22,6 @@
 #include "catalog/genbki.h"
 #include "nodes/pg_list.h"
 #include "access/attnum.h"
-
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_constraint
-   with (relid=2606, toast_oid=2832, toast_index=2833)
-   (
-   conname        name, 
-   connamespace   oid, 
-   contype        "char", 
-   condeferrable  boolean, 
-   condeferred    boolean, 
-   conrelid       oid, 
-   contypid       oid, 
-   confrelid      oid, 
-   confupdtype    "char", 
-   confdeltype    "char", 
-   confmatchtype  "char", 
-   conkey         smallint[], 
-   confkey        smallint[], 
-   conpfeqop      oid[],
-   conppeqop      oid[],
-   conffeqop      oid[],
-   conbin         text, 
-   consrc         text
-   );
-
-   create unique index on pg_constraint(oid) with (indexid=2667, CamelCase=ConstraintOid);
-   create index on pg_constraint(conname, connamespace) with (indexid=2664, CamelCase=ConstraintNameNsp);
-   create index on pg_constraint(conrelid) with (indexid=2665, CamelCase=ConstraintRelid);
-   create index on pg_constraint(contypid) with (indexid=2666, CamelCase=ConstraintTypid);
-
-   alter table pg_constraint add fk connamespace on pg_namespace(oid);
-   alter table pg_constraint add fk conrelid on pg_class(oid);
-   alter table pg_constraint add fk contypid on pg_type(oid);
-   alter table pg_constraint add fk confrelid on pg_class(oid);
-
-   TIDYCAT_ENDFAKEDEF
-*/
 
 /* ----------------
  *		pg_constraint definition.  cpp turns this into
@@ -153,6 +115,12 @@ CATALOG(pg_constraint,2606)
 	text		consrc;
 } FormData_pg_constraint;
 
+/* GPDB added foreign key definitions for gpcheckcat. */
+FOREIGN_KEY(connamespace REFERENCES pg_namespace(oid));
+FOREIGN_KEY(conrelid REFERENCES pg_class(oid));
+FOREIGN_KEY(contypid REFERENCES pg_type(oid));
+FOREIGN_KEY(confrelid REFERENCES pg_class(oid));
+
 /* ----------------
  *		Form_pg_constraint corresponds to a pointer to a tuple with
  *		the format of pg_constraint relation.
@@ -235,6 +203,7 @@ extern Oid CreateConstraintEntry(const char *constraintName,
 								 const char *conSrc);
 
 extern void RemoveConstraintById(Oid conId);
+extern void RenameConstraintById(Oid conId, const char *newname);
 
 extern bool ConstraintNameIsUsed(ConstraintCategory conCat, Oid objId,
 					 Oid objNamespace, const char *conname);

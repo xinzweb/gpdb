@@ -22,7 +22,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/utils/tuplestore.h,v 1.20 2007/01/05 22:20:00 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/utils/tuplestore.h,v 1.22 2008/01/01 19:45:59 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -58,10 +58,11 @@ tuplestore_set_instrument(Tuplestorestate          *state,
  * to support the same behavior for IndexTuples and/or bare Datums.
  */
 
-extern void tuplestore_begin_pos(Tuplestorestate* state, TuplestorePos **pos);
 extern Tuplestorestate* tuplestore_begin_heap(bool randomAccess,
 					  bool interXact,
 					  int maxKBytes);
+
+extern void tuplestore_set_eflags(Tuplestorestate *state, int eflags);
 
 extern void tuplestore_puttupleslot_pos(Tuplestorestate *state, TuplestorePos *pos, TupleTableSlot *slot);
 extern void tuplestore_puttupleslot(Tuplestorestate *state, TupleTableSlot *slot);
@@ -73,7 +74,6 @@ extern void tuplestore_puttuple(Tuplestorestate *state, HeapTuple tuple);
 /* tuplestore_donestoring() used to be required, but is no longer used */
 #define tuplestore_donestoring(state)	((void) 0)
 
-/* backwards scan is only allowed if randomAccess was specified 'true' */
 extern bool tuplestore_gettupleslot_pos(Tuplestorestate *state, TuplestorePos *pos, bool forward,
 						TupleTableSlot *slot);
 extern bool tuplestore_gettupleslot(Tuplestorestate *state, bool forward, TupleTableSlot *slot);
@@ -83,7 +83,6 @@ extern bool tuplestore_advance(Tuplestorestate *state, bool forward);
 
 extern void tuplestore_end(Tuplestorestate *state);
 
-extern bool tuplestore_ateof_pos(Tuplestorestate *state, TuplestorePos *pos);
 extern bool tuplestore_ateof(Tuplestorestate *state);
 
 extern void tuplestore_rescan_pos(Tuplestorestate *state, TuplestorePos *pos);
@@ -94,7 +93,5 @@ extern void tuplestore_markpos(Tuplestorestate *state);
 
 extern void tuplestore_restorepos_pos(Tuplestorestate *state, TuplestorePos *pos);
 extern void tuplestore_restorepos(Tuplestorestate *state);
-
-extern void tuplestore_flush(Tuplestorestate *state);
 
 #endif   /* TUPLESTORE_H */

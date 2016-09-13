@@ -8,14 +8,13 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/commands/conversioncmds.c,v 1.31 2007/02/14 01:58:56 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/commands/conversioncmds.c,v 1.32.2.1 2009/02/27 16:35:31 heikki Exp $
  *
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
 
 #include "access/heapam.h"
-#include "catalog/catquery.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_conversion.h"
@@ -110,6 +109,7 @@ CreateConversionCommand(CreateConversionStmt *stmt)
 					 CStringGetDatum(""),
 					 CStringGetDatum(result),
 					 Int32GetDatum(0));
+
 	/*
 	 * All seem ok, go ahead (possible failure would be a duplicate conversion
 	 * name)
@@ -119,7 +119,11 @@ CreateConversionCommand(CreateConversionStmt *stmt)
 					 
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
-		CdbDispatchUtilityStatement((Node *) stmt, "CreateConversionCommand");
+		CdbDispatchUtilityStatement((Node *) stmt,
+									DF_CANCEL_ON_ERROR|
+									DF_WITH_SNAPSHOT|
+									DF_NEED_TWO_PHASE,
+									NULL);
 	}
 }
 

@@ -8,14 +8,13 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/catalog/pg_aggregate.c,v 1.85 2007/01/22 01:35:20 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/catalog/pg_aggregate.c,v 1.90 2008/01/11 18:39:40 tgl Exp $
  *
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
 
 #include "access/heapam.h"
-#include "catalog/catquery.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_aggregate.h"
@@ -54,6 +53,7 @@ AggregateCreateWithOid(const char		*aggName,
 					   bool              aggordered,
 					   Oid				 procOid)
 {
+	Relation	aggdesc;
 	HeapTuple	tup;
 	bool		nulls[Natts_pg_aggregate];
 	Datum		values[Natts_pg_aggregate];
@@ -71,11 +71,10 @@ AggregateCreateWithOid(const char		*aggName,
 	Oid			prelimrettype;
 	Oid		   *fnArgs;
 	int			nargs_transfn;
+	TupleDesc	tupDesc;
 	int			i;
 	ObjectAddress myself,
 				referenced;
-	cqContext  *pcqCtx;
-	cqContext  *pcqCtx2;
 
 	/* sanity checks (caller should have caught these) */
 	if (!aggName)
@@ -89,8 +88,7 @@ AggregateCreateWithOid(const char		*aggName,
 	hasInternalArg = false;
 	for (i = 0; i < numArgs; i++)
 	{
-		if (aggArgTypes[i] == ANYARRAYOID ||
-			aggArgTypes[i] == ANYELEMENTOID)
+		if (IsPolymorphicType(aggArgTypes[i]))
 			hasPolyArg = true;
 		else if (aggArgTypes[i] == INTERNALOID)
 			hasInternalArg = true;
@@ -100,12 +98,11 @@ AggregateCreateWithOid(const char		*aggName,
 	 * If transtype is polymorphic, must have polymorphic argument also; else
 	 * we will have no way to deduce the actual transtype.
 	 */
-	if (!hasPolyArg &&
-		(aggTransType == ANYARRAYOID || aggTransType == ANYELEMENTOID))
+	if (IsPolymorphicType(aggTransType) && !hasPolyArg)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
 				 errmsg("cannot determine transition data type"),
-				 errdetail("An aggregate using \"anyarray\" or \"anyelement\" as transition type must have at least one argument of either type.")));
+				 errdetail("An aggregate using a polymorphic transition type must have at least one polymorphic argument.")));
 
 	/* find the transfn */
 	nargs_transfn = numArgs + 1;
@@ -138,14 +135,9 @@ AggregateCreateWithOid(const char		*aggName,
 						NameListToString(aggtransfnName),
 						format_type_be(aggTransType))));
 
-	pcqCtx2 = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_proc "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(transfn)));
-
-	tup = caql_getnext(pcqCtx2);
-
+	tup = SearchSysCache(PROCOID,
+						 ObjectIdGetDatum(transfn),
+						 0, 0, 0);
 	if (!HeapTupleIsValid(tup))
 		elog(ERROR, "cache lookup failed for function %u", transfn);
 	proc = (Form_pg_proc) GETSTRUCT(tup);
@@ -163,7 +155,7 @@ AggregateCreateWithOid(const char		*aggName,
 					(errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
 					 errmsg("must not omit initial value when transition function is strict and transition type is not compatible with input type")));
 	}
-	caql_endscan(pcqCtx2);
+	ReleaseSysCache(tup);
 	
 	/* handle prelimfn, if supplied */
 	if (aggprelimfnName)
@@ -223,13 +215,12 @@ AggregateCreateWithOid(const char		*aggName,
 	 * that itself violates the rule against polymorphic result with no
 	 * polymorphic input.)
 	 */
-	if (!hasPolyArg &&
-		(finaltype == ANYARRAYOID || finaltype == ANYELEMENTOID))
+	if (IsPolymorphicType(finaltype) && !hasPolyArg)
 		ereport(ERROR,
 				(errcode(ERRCODE_DATATYPE_MISMATCH),
 				 errmsg("cannot determine result data type"),
-				 errdetail("An aggregate returning \"anyarray\" or \"anyelement\" "
-						   "must have at least one argument of either type.")));
+				 errdetail("An aggregate returning a polymorphic type "
+						   "must have at least one polymorphic argument.")));
 
 	/*
 	 * Also, the return type can't be INTERNAL unless there's at least one
@@ -283,6 +274,7 @@ AggregateCreateWithOid(const char		*aggName,
 							  PointerGetDatum(NULL),	/* parameterModes */
 							  PointerGetDatum(NULL),	/* parameterNames */
 							  NIL,						/* parameterDefaults */
+							  PointerGetDatum(NULL),	/* proconfig */
 							  1,				/* procost */
 							  0,				/* prorows */
 							  PRODATAACCESS_NONE,		/* prodataaccess */
@@ -312,17 +304,15 @@ AggregateCreateWithOid(const char		*aggName,
 		nulls[Anum_pg_aggregate_agginitval - 1] = true;
 	values[Anum_pg_aggregate_aggordered - 1] = BoolGetDatum(aggordered);
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("INSERT INTO pg_aggregate",
-				NULL));
+	aggdesc = heap_open(AggregateRelationId, RowExclusiveLock);
+	tupDesc = aggdesc->rd_att;
 
-	tup = caql_form_tuple(pcqCtx, values, nulls);
+	tup = heap_form_tuple(tupDesc, values, nulls);
+	simple_heap_insert(aggdesc, tup);
 
-	/* insert a new tuple */
-	caql_insert(pcqCtx, tup); /* implicit update of index as well */
+	CatalogUpdateIndexes(aggdesc, tup);
 
-	caql_endscan(pcqCtx);
+	heap_close(aggdesc, RowExclusiveLock);
 
 	/*
 	 * Create dependencies for the aggregate (above and beyond those already
@@ -405,7 +395,6 @@ lookup_agg_function(List *fnName,
 	FuncDetailCode fdresult;
 	AclResult	aclresult;
 	int			i;
-	bool		allPolyArgs = true;
 
 	/*
 	 * func_get_detail looks up the function in the catalogs, does
@@ -431,26 +420,15 @@ lookup_agg_function(List *fnName,
 						func_signature_string(fnName, nargs, input_types))));
 
 	/*
-	 * If the given type(s) are all polymorphic, there's nothing we can check.
-	 * Otherwise, enforce consistency, and possibly refine the result type.
+	 * If there are any polymorphic types involved, enforce consistency, and
+	 * possibly refine the result type.  It's OK if the result is still
+	 * polymorphic at this point, though.
 	 */
-	for (i = 0; i < nargs; i++)
-	{
-		if (input_types[i] != ANYARRAYOID &&
-			input_types[i] != ANYELEMENTOID)
-		{
-			allPolyArgs = false;
-			break;
-		}
-	}
-
-	if (!allPolyArgs)
-	{
-		*rettype = enforce_generic_type_consistency(input_types,
-													true_oid_array,
-													nargs,
-													*rettype);
-	}
+	*rettype = enforce_generic_type_consistency(input_types,
+												true_oid_array,
+												nargs,
+												*rettype,
+												true);
 
 	/*
 	 * func_get_detail will find functions requiring run-time argument type
@@ -458,8 +436,7 @@ lookup_agg_function(List *fnName,
 	 */
 	for (i = 0; i < nargs; i++)
 	{
-		if (true_oid_array[i] != ANYARRAYOID &&
-			true_oid_array[i] != ANYELEMENTOID &&
+		if (!IsPolymorphicType(true_oid_array[i]) &&
 			!IsBinaryCoercible(input_types[i], true_oid_array[i]))
 			ereport(ERROR,
 					(errcode(ERRCODE_DATATYPE_MISMATCH),

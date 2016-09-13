@@ -5,11 +5,11 @@
  *	  on system catalogs
  *
  *
- * Copyright (c) 2007-2010, Greenplum inc
+ * Portions Copyright (c) 2007-2010, Greenplum inc
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/indexing.h,v 1.98 2007/02/14 01:58:58 tgl Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/indexing.h,v 1.102 2008/01/01 19:45:56 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -58,6 +58,9 @@ extern void CatalogUpdateIndexes(Relation heapRel, HeapTuple heapTuple);
  * index name (much less the numeric OID).
  */
 
+DECLARE_UNIQUE_INDEX(pg_aggregate_fnoid_index, 2650, on pg_aggregate using btree(aggfnoid oid_ops));
+#define AggregateAggfnoidIndexId	2650
+
 DECLARE_UNIQUE_INDEX(pg_am_name_index, 2651, on pg_am using btree(amname name_ops));
 #define AmNameIndexId  2651
 DECLARE_UNIQUE_INDEX(pg_am_oid_index, 2652, on pg_am using btree(oid oid_ops));
@@ -68,7 +71,7 @@ DECLARE_UNIQUE_INDEX(pg_amop_fam_strat_index, 2653, on pg_amop using btree(amopf
 DECLARE_UNIQUE_INDEX(pg_amop_opr_fam_index, 2654, on pg_amop using btree(amopopr oid_ops, amopfamily oid_ops));
 #define AccessMethodOperatorIndexId  2654
 DECLARE_UNIQUE_INDEX(pg_amop_oid_index, 2756, on pg_amop using btree(oid oid_ops));
-#define AccessMethodOperatorOidIndexId  2756
+#define AccessMethodOperatorOidIndexId	2756
 
 DECLARE_UNIQUE_INDEX(pg_amproc_fam_proc_index, 2655, on pg_amproc using btree(amprocfamily oid_ops, amproclefttype oid_ops, amprocrighttype oid_ops, amprocnum int2_ops));
 #define AccessMethodProcedureIndexId  2655
@@ -84,6 +87,13 @@ DECLARE_UNIQUE_INDEX(pg_attribute_relid_attnam_index, 2658, on pg_attribute usin
 #define AttributeRelidNameIndexId  2658
 DECLARE_UNIQUE_INDEX(pg_attribute_relid_attnum_index, 2659, on pg_attribute using btree(attrelid oid_ops, attnum int2_ops));
 #define AttributeRelidNumIndexId  2659
+
+DECLARE_UNIQUE_INDEX(pg_authid_rolname_index, 2676, on pg_authid using btree(rolname name_ops));
+#define AuthIdRolnameIndexId	2676
+DECLARE_UNIQUE_INDEX(pg_authid_oid_index, 2677, on pg_authid using btree(oid oid_ops));
+#define AuthIdOidIndexId	2677
+DECLARE_INDEX(pg_authid_rolresqueue_index, 6029, on pg_authid using btree(rolresqueue oid_ops));
+#define AuthIdRolResQueueIndexId	6029
 
 DECLARE_UNIQUE_INDEX(pg_auth_members_role_member_index, 2694, on pg_auth_members using btree(roleid oid_ops, member oid_ops));
 #define AuthMemRoleMemIndexId	2694
@@ -139,6 +149,11 @@ DECLARE_UNIQUE_INDEX(pg_description_o_c_o_index, 2675, on pg_description using b
 DECLARE_UNIQUE_INDEX(pg_shdescription_o_c_index, 2397, on pg_shdescription using btree(objoid oid_ops, classoid oid_ops));
 #define SharedDescriptionObjIndexId 2397
 
+DECLARE_UNIQUE_INDEX(pg_enum_oid_index, 3502, on pg_enum using btree(oid oid_ops));
+#define EnumOidIndexId	3502
+DECLARE_UNIQUE_INDEX(pg_enum_typid_label_index, 3503, on pg_enum using btree(enumtypid oid_ops, enumlabel name_ops));
+#define EnumTypIdLabelIndexId 3503
+
 /* This following index is not used for a cache and is not unique */
 DECLARE_INDEX(pg_index_indrelid_index, 2678, on pg_index using btree(indrelid oid_ops));
 #define IndexIndrelidIndexId  2678
@@ -147,6 +162,19 @@ DECLARE_UNIQUE_INDEX(pg_index_indexrelid_index, 2679, on pg_index using btree(in
 
 DECLARE_UNIQUE_INDEX(pg_inherits_relid_seqno_index, 2680, on pg_inherits using btree(inhrelid oid_ops, inhseqno int4_ops));
 #define InheritsRelidSeqnoIndexId  2680
+
+DECLARE_UNIQUE_INDEX(pg_language_lanname_index, 2681, on pg_language using btree(lanname name_ops));
+#define LanguageNameIndexId  2681
+DECLARE_UNIQUE_INDEX(pg_language_oid_index, 2682, on pg_language using btree(oid oid_ops));
+#define LanguageOidIndexId	2682
+
+DECLARE_UNIQUE_INDEX(pg_largeobject_loid_pn_index, 2683, on pg_largeobject using btree(loid oid_ops, pageno int4_ops));
+#define LargeObjectLoidPagenoIndexId	2683
+
+DECLARE_UNIQUE_INDEX(pg_namespace_nspname_index, 2684, on pg_namespace using btree(nspname name_ops));
+#define NamespaceNspnameIndexId	2684
+DECLARE_UNIQUE_INDEX(pg_namespace_oid_index, 2685, on pg_namespace using btree(oid oid_ops));
+#define NamespaceOidIndexId  2685
 
 DECLARE_UNIQUE_INDEX(pg_opclass_am_name_nsp_index, 2686, on pg_opclass using btree(opcmethod oid_ops, opcname name_ops, opcnamespace oid_ops));
 #define OpclassAmNameNspIndexId  2686
@@ -161,7 +189,7 @@ DECLARE_UNIQUE_INDEX(pg_operator_oprname_l_r_n_index, 2689, on pg_operator using
 DECLARE_UNIQUE_INDEX(pg_opfamily_am_name_nsp_index, 2754, on pg_opfamily using btree(opfmethod oid_ops, opfname name_ops, opfnamespace oid_ops));
 #define OpfamilyAmNameNspIndexId  2754
 DECLARE_UNIQUE_INDEX(pg_opfamily_oid_index, 2755, on pg_opfamily using btree(oid oid_ops));
-#define OpfamilyOidIndexId  2755
+#define OpfamilyOidIndexId	2755
 
 DECLARE_UNIQUE_INDEX(pg_pltemplate_name_index, 1137, on pg_pltemplate using btree(tmplname name_ops));
 #define PLTemplateNameIndexId  1137
@@ -188,8 +216,8 @@ DECLARE_UNIQUE_INDEX(pg_statistic_relid_att_index, 2696, on pg_statistic using b
 
 DECLARE_UNIQUE_INDEX(pg_filespace_oid_index, 2858, on pg_filespace using btree(oid oid_ops));
 #define FilespaceOidIndexId  2858
-DECLARE_UNIQUE_INDEX(pg_filespace_fsname_index, 2859, on pg_filespace using btree(fsname name_ops));
-#define FilespaceNameIndexId  2859
+DECLARE_UNIQUE_INDEX(pg_filespace_fsname_index, 6998, on pg_filespace using btree(fsname name_ops));
+#define FilespaceNameIndexId  6998
 
 DECLARE_UNIQUE_INDEX(pg_tablespace_oid_index, 2697, on pg_tablespace using btree(oid oid_ops));
 #define TablespaceOidIndexId  2697
@@ -203,6 +231,29 @@ DECLARE_UNIQUE_INDEX(pg_trigger_tgrelid_tgname_index, 2701, on pg_trigger using 
 #define TriggerRelidNameIndexId  2701
 DECLARE_UNIQUE_INDEX(pg_trigger_oid_index, 2702, on pg_trigger using btree(oid oid_ops));
 #define TriggerOidIndexId  2702
+
+DECLARE_UNIQUE_INDEX(pg_ts_config_cfgname_index, 3608, on pg_ts_config using btree(cfgname name_ops, cfgnamespace oid_ops));
+#define TSConfigNameNspIndexId	3608
+DECLARE_UNIQUE_INDEX(pg_ts_config_oid_index, 3712, on pg_ts_config using btree(oid oid_ops));
+#define TSConfigOidIndexId	3712
+
+DECLARE_UNIQUE_INDEX(pg_ts_config_map_index, 3609, on pg_ts_config_map using btree(mapcfg oid_ops, maptokentype int4_ops, mapseqno int4_ops));
+#define TSConfigMapIndexId	3609
+
+DECLARE_UNIQUE_INDEX(pg_ts_dict_dictname_index, 3604, on pg_ts_dict using btree(dictname name_ops, dictnamespace oid_ops));
+#define TSDictionaryNameNspIndexId	3604
+DECLARE_UNIQUE_INDEX(pg_ts_dict_oid_index, 3605, on pg_ts_dict using btree(oid oid_ops));
+#define TSDictionaryOidIndexId	3605
+
+DECLARE_UNIQUE_INDEX(pg_ts_parser_prsname_index, 3606, on pg_ts_parser using btree(prsname name_ops, prsnamespace oid_ops));
+#define TSParserNameNspIndexId	3606
+DECLARE_UNIQUE_INDEX(pg_ts_parser_oid_index, 3607, on pg_ts_parser using btree(oid oid_ops));
+#define TSParserOidIndexId	3607
+
+DECLARE_UNIQUE_INDEX(pg_ts_template_tmplname_index, 3766, on pg_ts_template using btree(tmplname name_ops, tmplnamespace oid_ops));
+#define TSTemplateNameNspIndexId	3766
+DECLARE_UNIQUE_INDEX(pg_ts_template_oid_index, 3767, on pg_ts_template using btree(oid oid_ops));
+#define TSTemplateOidIndexId	3767
 
 DECLARE_UNIQUE_INDEX(pg_type_oid_index, 2703, on pg_type using btree(oid oid_ops));
 #define TypeOidIndexId	2703
@@ -235,152 +286,97 @@ DECLARE_INDEX(pg_statlastshop_classid_objid_index, 6057, on pg_stat_last_shopera
 DECLARE_UNIQUE_INDEX(pg_statlastshop_classid_objid_staactionname_index, 6058, on pg_stat_last_shoperation using btree(classid oid_ops, objid oid_ops, staactionname name_ops));
 #define StatLastShOpClassidObjidStaactionnameIndexId  6058
 
-/* TIDYCAT_BEGIN_CODEGEN 
-*/
-/*
-   WARNING: DO NOT MODIFY THE FOLLOWING SECTION: 
-   Generated by ./tidycat.pl version 31
-   on Thu Sep  1 16:43:17 2011
- */
-/* relation id: 6026 - pg_resqueue 20100129 */
 DECLARE_UNIQUE_INDEX(pg_resqueue_oid_index, 6027, on pg_resqueue using btree(oid oid_ops));
 #define ResQueueOidIndexId	6027
-/* relation id: 6026 - pg_resqueue 20100129 */
 DECLARE_UNIQUE_INDEX(pg_resqueue_rsqname_index, 6028, on pg_resqueue using btree(rsqname name_ops));
 #define ResQueueRsqnameIndexId	6028
-/* relation id: 6059 - pg_resourcetype 20100129 */
+
 DECLARE_UNIQUE_INDEX(pg_resourcetype_oid_index, 6061, on pg_resourcetype using btree(oid oid_ops));
 #define ResourceTypeOidIndexId	6061
-/* relation id: 6059 - pg_resourcetype 20100129 */
 DECLARE_UNIQUE_INDEX(pg_resourcetype_restypid_index, 6062, on pg_resourcetype using btree(restypid int2_ops));
 #define ResourceTypeRestypidIndexId	6062
-/* relation id: 6059 - pg_resourcetype 20100129 */
 DECLARE_UNIQUE_INDEX(pg_resourcetype_resname_index, 6063, on pg_resourcetype using btree(resname name_ops));
 #define ResourceTypeResnameIndexId	6063
-/* relation id: 6060 - pg_resqueuecapability 20100129 */
+
 DECLARE_UNIQUE_INDEX(pg_resqueuecapability_oid_index, 6064, on pg_resqueuecapability using btree(oid oid_ops));
 #define ResQueueCapabilityOidIndexId	6064
-/* relation id: 6060 - pg_resqueuecapability 20100129 */
 DECLARE_INDEX(pg_resqueuecapability_resqueueid_index, 6065, on pg_resqueuecapability using btree(resqueueid oid_ops));
 #define ResQueueCapabilityResqueueidIndexId	6065
-/* relation id: 6060 - pg_resqueuecapability 20100129 */
 DECLARE_INDEX(pg_resqueuecapability_restypid_index, 6066, on pg_resqueuecapability using btree(restypid int2_ops));
 #define ResQueueCapabilityRestypidIndexId	6066
-/* relation id: 1260 - pg_authid 20100129 */
-DECLARE_UNIQUE_INDEX(pg_authid_rolname_index, 2676, on pg_authid using btree(rolname name_ops));
-#define AuthIdRolnameIndexId	2676
-/* relation id: 1260 - pg_authid 20100129 */
-DECLARE_UNIQUE_INDEX(pg_authid_oid_index, 2677, on pg_authid using btree(oid oid_ops));
-#define AuthIdOidIndexId	2677
-/* relation id: 1260 - pg_authid 20100129 */
-DECLARE_INDEX(pg_authid_rolresqueue_index, 6029, on pg_authid using btree(rolresqueue oid_ops));
-#define AuthIdRolResQueueIndexId	6029
-/* relation id: 5010 - pg_partition 20101001 */
+
 DECLARE_UNIQUE_INDEX(pg_partition_oid_index, 5012, on pg_partition using btree(oid oid_ops));
 #define PartitionOidIndexId	5012
-/* relation id: 5010 - pg_partition 20101001 */
 DECLARE_INDEX(pg_partition_parrelid_index, 5013, on pg_partition using btree(parrelid oid_ops));
 #define PartitionParrelidIndexId	5013
-/* relation id: 5010 - pg_partition 20101001 */
 DECLARE_INDEX(pg_partition_parrelid_parlevel_istemplate_index, 5017, on pg_partition using btree(parrelid oid_ops, parlevel int2_ops, paristemplate bool_ops));
 #define PartitionParrelidParlevelParistemplateIndexId	5017
-/* relation id: 5011 - pg_partition_rule 20101001 */
+
 DECLARE_UNIQUE_INDEX(pg_partition_rule_oid_index, 5014, on pg_partition_rule using btree(oid oid_ops));
 #define PartitionRuleOidIndexId	5014
-/* relation id: 5011 - pg_partition_rule 20101001 */
 DECLARE_INDEX(pg_partition_rule_parchildrelid_index, 5016, on pg_partition_rule using btree(parchildrelid oid_ops));
 #define PartitionRuleParchildrelidIndexId	5016
-/* relation id: 5011 - pg_partition_rule 20101001 */
 DECLARE_INDEX(pg_partition_rule_parchildrelid_parparentrule_parruleord_index, 5015, on pg_partition_rule using btree(parchildrelid oid_ops, parparentrule oid_ops, parruleord int2_ops));
 #define PartitionRuleParchildrelidParparentruleParruleordIndexId	5015
-/* relation id: 5011 - pg_partition_rule 20101001 */
 DECLARE_INDEX(pg_partition_rule_paroid_parentrule_ruleord_index, 5026, on pg_partition_rule using btree(paroid oid_ops, parparentrule oid_ops, parruleord int2_ops));
 #define PartitionRuleParoidParparentruleParruleordIndexId	5026
-/* relation id: 6040 - pg_exttable 20101014 */
+
 DECLARE_UNIQUE_INDEX(pg_exttable_reloid_index, 6041, on pg_exttable using btree(reloid oid_ops));
 #define ExtTableReloidIndexId	6041
-/* relation id: 2600 - pg_aggregate 20101018 */
-DECLARE_UNIQUE_INDEX(pg_aggregate_fnoid_index, 2650, on pg_aggregate using btree(aggfnoid oid_ops));
-#define AggregateAggfnoidIndexId	2650
-/* relation id: 5004 - pg_window 20101018 */
+
 DECLARE_UNIQUE_INDEX(pg_window_fnoid_index, 5005, on pg_window using btree(winfnoid oid_ops));
 #define WindowWinfnoidIndexId	5005
-/* relation id: 5035 - gp_san_configuration 20101104 */
+
 DECLARE_UNIQUE_INDEX(gp_san_config_mountid_index, 6111, on gp_san_configuration using btree(mountid int2_ops));
 #define GpSanConfigMountidIndexId	6111
-/* relation id: 5000 - gp_configuration 20101105 */
+
 DECLARE_UNIQUE_INDEX(gp_configuration_content_definedprimary_index, 6101, on gp_configuration using btree(content int2_ops, definedprimary bool_ops));
 #define GpConfigurationContentDefinedprimaryIndexId	6101
-/* relation id: 5000 - gp_configuration 20101105 */
 DECLARE_UNIQUE_INDEX(gp_configuration_dbid_index, 6102, on gp_configuration using btree(dbid int2_ops));
 #define GpConfigurationDbidIndexId	6102
-/* relation id: 5029 - gp_db_interfaces 20101105 */
+
 DECLARE_INDEX(gp_db_interfaces_dbid_index, 6108, on gp_db_interfaces using btree(dbid int2_ops));
 #define GpDbInterfacesDbidIndexId	6108
-/* relation id: 5030 - gp_interfaces 20101105 */
+
 DECLARE_UNIQUE_INDEX(gp_interfaces_interface_index, 6109, on gp_interfaces using btree(interfaceid int2_ops));
 #define GpInterfacesInterfaceidIndexId	6109
-/* relation id: 2613 - pg_largeobject 20101105 */
-DECLARE_UNIQUE_INDEX(pg_largeobject_loid_pn_index, 2683, on pg_largeobject using btree(loid oid_ops, pageno int4_ops));
-#define LargeObjectLoidPagenoIndexId	2683
-/* relation id: 2615 - pg_namespace 20101105 */
-DECLARE_UNIQUE_INDEX(pg_namespace_nspname_index, 2684, on pg_namespace using btree(nspname name_ops));
-#define NamespaceNspnameIndexId	2684
-/* relation id: 2615 - pg_namespace 20101105 */
-DECLARE_UNIQUE_INDEX(pg_namespace_oid_index, 2685, on pg_namespace using btree(oid oid_ops));
-#define NamespaceOidIndexId	2685
-/* relation id: 5033 - pg_filespace_entry 20101122 */
+
 DECLARE_INDEX(pg_filespace_entry_fs_index, 6090, on pg_filespace_entry using btree(fsefsoid oid_ops));
 #define FileSpaceEntryFsefsoidIndexId	6090
-/* relation id: 5033 - pg_filespace_entry 20101122 */
 DECLARE_UNIQUE_INDEX(pg_filespace_entry_fsdb_index, 6091, on pg_filespace_entry using btree(fsefsoid oid_ops, fsedbid int2_ops));
 #define FileSpaceEntryFsefsoidFsedbidIndexId	6091
-/* relation id: 5036 - gp_segment_configuration 20101122 */
+
 DECLARE_UNIQUE_INDEX(gp_segment_config_content_preferred_role_index, 6106, on gp_segment_configuration using btree(content int2_ops, preferred_role char_ops));
 #define GpSegmentConfigContentPreferred_roleIndexId	6106
-/* relation id: 5036 - gp_segment_configuration 20101122 */
 DECLARE_UNIQUE_INDEX(gp_segment_config_dbid_index, 6107, on gp_segment_configuration using btree(dbid int2_ops));
 #define GpSegmentConfigDbidIndexId	6107
-/* relation id: 7175 - pg_extprotocol 20110526 */
+
 DECLARE_UNIQUE_INDEX(pg_extprotocol_oid_index, 7156, on pg_extprotocol using btree(oid oid_ops));
 #define ExtprotocolOidIndexId	7156
-/* relation id: 7175 - pg_extprotocol 20110526 */
 DECLARE_UNIQUE_INDEX(pg_extprotocol_ptcname_index, 7177, on pg_extprotocol using btree(ptcname name_ops));
 #define ExtprotocolPtcnameIndexId	7177
-/* relation id: 2612 - pg_language 20110607 */
-DECLARE_UNIQUE_INDEX(pg_language_lanname_index, 2681, on pg_language using btree(lanname name_ops));
-#define LanguageNameIndexId	2681
-/* relation id: 2612 - pg_language 20110607 */
-DECLARE_UNIQUE_INDEX(pg_language_oid_index, 2682, on pg_language using btree(oid oid_ops));
-#define LanguageOidIndexId	2682
-/* relation id: 3231 - pg_attribute_encoding 20110727 */
+
 DECLARE_INDEX(pg_attribute_encoding_attrelid_index, 3236, on pg_attribute_encoding using btree(attrelid oid_ops));
 #define AttributeEncodingAttrelidIndexId	3236
-/* relation id: 3231 - pg_attribute_encoding 20110727 */
 DECLARE_UNIQUE_INDEX(pg_attribute_encoding_attrelid_attnum_index, 3237, on pg_attribute_encoding using btree(attrelid oid_ops, attnum int2_ops));
 #define AttributeEncodingAttrelidAttnumIndexId	3237
-/* relation id: 3220 - pg_type_encoding 20110727 */
+
 DECLARE_UNIQUE_INDEX(pg_type_encoding_typid_index, 3207, on pg_type_encoding using btree(typid oid_ops));
 #define TypeEncodingTypidIndexId	3207
-/* relation id: 9903 - pg_partition_encoding 20110814 */
+
 DECLARE_UNIQUE_INDEX(pg_partition_encoding_parencoid_parencattnum_index, 9908, on pg_partition_encoding using btree(parencoid oid_ops, parencattnum int2_ops));
 #define PartitionEncodingParencoidAttnumIndexId	9908
 
-/* relation id: 3124 - pg_proc_callback 20110829 */
 DECLARE_UNIQUE_INDEX(pg_proc_callback_profnoid_promethod_index, 3126, on pg_proc_callback using btree(profnoid oid_ops, promethod char_ops));
 #define ProcCallbackProfnoidPromethodIndexId	3126
-/* relation id: 9903 - pg_partition_encoding 20110814 */
+
 DECLARE_INDEX(pg_partition_encoding_parencoid_index, 9909, on pg_partition_encoding using btree(parencoid oid_ops));
 #define PartitionEncodingParencoidIndexId	9909
-/* relation id: 3056 - pg_compression 20110901 */
+
 DECLARE_UNIQUE_INDEX(pg_compression_oid_index, 3058, on pg_compression using btree(oid oid_ops));
 #define CompressionOidIndexId	3058
-
-/* relation id: 3056 - pg_compression 20110901 */
 DECLARE_UNIQUE_INDEX(pg_compression_compname_index, 3059, on pg_compression using btree(compname name_ops));
 #define CompressionCompnameIndexId	3059
-
-/* TIDYCAT_END_CODEGEN */
 
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES

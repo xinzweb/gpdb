@@ -7,7 +7,7 @@
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/commands/proclang.c,v 1.71 2007/01/22 01:35:20 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/commands/proclang.c,v 1.74.2.1 2008/04/29 19:37:13 alvherre Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -15,19 +15,21 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
-#include "catalog/catquery.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_pltemplate.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "commands/dbcommands.h"
 #include "commands/defrem.h"
 #include "commands/proclang.h"
 #include "miscadmin.h"
 #include "parser/gramparse.h"
 #include "parser/parse_func.h"
+#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -39,15 +41,19 @@
 typedef struct
 {
 	bool		tmpltrusted;	/* trusted? */
+	bool		tmpldbacreate;	/* db owner allowed to create? */
 	char	   *tmplhandler;	/* name of handler function */
 	char	   *tmplinline;		/* name of anonymous-block handler, or NULL */
 	char	   *tmplvalidator;	/* name of validator function, or NULL */
 	char	   *tmpllibrary;	/* path of shared library */
 } PLTemplate;
 
-static void create_proc_lang(const char *languageName, Oid handlerOid,
-				 Oid inlineOid, Oid valOid, bool trusted, Oid *plangOid);
+static void create_proc_lang(const char *languageName,
+				 Oid languageOwner, Oid handlerOid, Oid inlineOid,
+				 Oid valOid, bool trusted, Oid *plangOid);
 static PLTemplate *find_language_template(const char *languageName);
+static void AlterLanguageOwner_internal(HeapTuple tup, Relation rel,
+							Oid newOwnerId);
 
 
 /* ---------------------------------------------------------------------
@@ -66,24 +72,14 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 	Oid			funcargtypes[1];
 
 	/*
-	 * Check permission
-	 */
-	if (!superuser())
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("must be superuser to create procedural language")));
-
-	/*
 	 * Translate the language name and check that this language doesn't
 	 * already exist
 	 */
 	languageName = case_translate_language_name(stmt->plname);
 
-	if (caql_getcount(
-				NULL,
-				cql("SELECT COUNT(*) FROM pg_language "
-					" WHERE lanname = :1 ",
-					CStringGetDatum(languageName))))
+	if (SearchSysCacheExists(LANGNAME,
+							 PointerGetDatum(languageName),
+							 0, 0, 0))
 	{
 		/*
 		 * MPP-7563: special case plpgsql to omit a notice if it already exists
@@ -129,6 +125,21 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 								"CREATE LANGUAGE parameters")));
 
 		/*
+		 * Check permission
+		 */
+		if (!superuser())
+		{
+			if (!pltemplate->tmpldbacreate)
+				ereport(ERROR,
+						(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+						 errmsg("must be superuser to create procedural language \"%s\"",
+								languageName)));
+			if (!pg_database_ownercheck(MyDatabaseId, GetUserId()))
+				aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE,
+							   get_database_name(MyDatabaseId));
+		}
+
+		/*
 		 * Find or create the handler function, which we force to be in the
 		 * pg_catalog schema.  If already present, it must have the correct
 		 * return type.
@@ -166,6 +177,7 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 										 PointerGetDatum(NULL),
 										 PointerGetDatum(NULL),
 										 NIL,
+										 PointerGetDatum(NULL),
 										 1,
 										 0,
 										 PRODATAACCESS_NONE,
@@ -203,6 +215,7 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 										 PointerGetDatum(NULL),
 										 PointerGetDatum(NULL),
 										 NIL,
+										 PointerGetDatum(NULL),
 										 1,
 										 0,
 										 PRODATAACCESS_NONE,
@@ -244,6 +257,7 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 										 PointerGetDatum(NULL),
 										 PointerGetDatum(NULL),
 										 NIL,
+										 PointerGetDatum(NULL),
 										 1,
 										 0,
 										 PRODATAACCESS_NONE,
@@ -254,8 +268,8 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 			valOid = InvalidOid;
 
 		/* ok, create it */
-		create_proc_lang(languageName, handlerOid, inlineOid, valOid,
-						 pltemplate->tmpltrusted, &(stmt->plangOid));
+		create_proc_lang(languageName, GetUserId(), handlerOid, inlineOid,
+						 valOid, pltemplate->tmpltrusted, &(stmt->plangOid));
 	}
 	else
 	{
@@ -270,6 +284,14 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 					 errmsg("unsupported language \"%s\"",
 							languageName),
 					 errhint("The supported languages are listed in the pg_pltemplate system catalog.")));
+
+		/*
+		 * Check permission
+		 */
+		if (!superuser())
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("must be superuser to create custom procedural language")));
 
 		/*
 		 * Lookup the PL handler function and check that it is of the expected
@@ -321,16 +343,20 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
 			valOid = InvalidOid;
 
 		/* ok, create it */
-		create_proc_lang(languageName, handlerOid, inlineOid, valOid, stmt->pltrusted, &(stmt->plangOid));
+		create_proc_lang(languageName, GetUserId(), handlerOid, inlineOid,
+						 valOid, stmt->pltrusted, &(stmt->plangOid));
 	}
-	
-	
+
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
 		stmt->plhandlerOid = handlerOid;
 		stmt->plinlineOid = inlineOid;
 		stmt->plvalidatorOid = valOid;
-		CdbDispatchUtilityStatement((Node *) stmt, "CreateProceduralLanguage");
+		CdbDispatchUtilityStatement((Node *) stmt,
+									DF_CANCEL_ON_ERROR|
+									DF_WITH_SNAPSHOT|
+									DF_NEED_TWO_PHASE,
+									NULL);
 	}
 }
 
@@ -339,29 +365,30 @@ CreateProceduralLanguage(CreatePLangStmt *stmt)
  */
 static void
 create_proc_lang(const char *languageName,
-				 Oid handlerOid, Oid inlineOid, Oid valOid, bool trusted, Oid *plangoid)
+				 Oid languageOwner, Oid handlerOid, Oid inlineOid,
+				 Oid valOid, bool trusted, Oid *plangoid)
 {
+	Relation	rel;
+	TupleDesc	tupDesc;
 	Datum		values[Natts_pg_language];
 	bool		nulls[Natts_pg_language];
 	NameData	langname;
 	HeapTuple	tup;
-	cqContext  *pcqCtx;
 	ObjectAddress myself,
 				referenced;
 
 	/*
 	 * Insert the new language into pg_language
 	 */
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("INSERT INTO pg_language", 
-				NULL));
+	rel = heap_open(LanguageRelationId, RowExclusiveLock);
+	tupDesc = rel->rd_att;
 
 	memset(values, 0, sizeof(values));
 	memset(nulls, false, sizeof(nulls));
 
 	namestrcpy(&langname, languageName);
 	values[Anum_pg_language_lanname - 1] = NameGetDatum(&langname);
+	values[Anum_pg_language_lanowner - 1] = ObjectIdGetDatum(languageOwner);
 	values[Anum_pg_language_lanispl - 1] = BoolGetDatum(true);
 	values[Anum_pg_language_lanpltrusted - 1] = BoolGetDatum(trusted);
 	values[Anum_pg_language_lanplcallfoid - 1] = ObjectIdGetDatum(handlerOid);
@@ -369,13 +396,15 @@ create_proc_lang(const char *languageName,
 	values[Anum_pg_language_lanvalidator - 1] = ObjectIdGetDatum(valOid);
 	nulls[Anum_pg_language_lanacl - 1] = true;
 
-	tup = caql_form_tuple(pcqCtx, values, nulls);
+	tup = heap_form_tuple(tupDesc, values, nulls);
 
 	/* Keep oids synchronized between master and segments */
 	if (OidIsValid(*plangoid))
 		HeapTupleSetOid(tup, *plangoid);
 
-	*plangoid = caql_insert(pcqCtx, tup); /* implicit update of index as well*/
+	*plangoid = simple_heap_insert(rel, tup);
+
+	CatalogUpdateIndexes(rel, tup);
 
 	/*
 	 * Create dependencies for language
@@ -383,6 +412,12 @@ create_proc_lang(const char *languageName,
 	myself.classId = LanguageRelationId;
 	myself.objectId = HeapTupleGetOid(tup);
 	myself.objectSubId = 0;
+
+	/* dependency on owner of language */
+	referenced.classId = AuthIdRelationId;
+	referenced.objectId = languageOwner;
+	referenced.objectSubId = 0;
+	recordSharedDependencyOn(&myself, &referenced, SHARED_DEPENDENCY_OWNER);
 
 	/* dependency on the PL handler function */
 	referenced.classId = ProcedureRelationId;
@@ -408,8 +443,7 @@ create_proc_lang(const char *languageName,
 		recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
 	}
 
-	caql_endscan(pcqCtx);
-
+	heap_close(rel, RowExclusiveLock);
 }
 
 /*
@@ -420,17 +454,20 @@ find_language_template(const char *languageName)
 {
 	PLTemplate *result;
 	Relation	rel;
+	SysScanDesc scan;
+	ScanKeyData key;
 	HeapTuple	tup;
-	cqContext	cqc;
 
 	rel = heap_open(PLTemplateRelationId, AccessShareLock);
 
-	tup = caql_getfirst(
-			caql_addrel(cqclr(&cqc), rel),
-			cql("SELECT * FROM pg_pltemplate "
-				" WHERE tmplname = :1 ",
-				CStringGetDatum((char *) languageName)));
+	ScanKeyInit(&key,
+				Anum_pg_pltemplate_tmplname,
+				BTEqualStrategyNumber, F_NAMEEQ,
+				CStringGetDatum(languageName));
+	scan = systable_beginscan(rel, PLTemplateNameIndexId, true,
+							  SnapshotNow, 1, &key);
 
+	tup = systable_getnext(scan);
 	if (HeapTupleIsValid(tup))
 	{
 		Form_pg_pltemplate tmpl = (Form_pg_pltemplate) GETSTRUCT(tup);
@@ -439,6 +476,7 @@ find_language_template(const char *languageName)
 
 		result = (PLTemplate *) palloc0(sizeof(PLTemplate));
 		result->tmpltrusted = tmpl->tmpltrusted;
+		result->tmpldbacreate = tmpl->tmpldbacreate;
 
 		/* Remaining fields are variable-width so we need heap_getattr */
 		datum = heap_getattr(tup, Anum_pg_pltemplate_tmplhandler,
@@ -471,6 +509,8 @@ find_language_template(const char *languageName)
 	else
 		result = NULL;
 
+	systable_endscan(scan);
+
 	heap_close(rel, AccessShareLock);
 
 	return result;
@@ -495,32 +535,18 @@ void
 DropProceduralLanguage(DropPLangStmt *stmt)
 {
 	char	   *languageName;
-	int			fetchCount;
-	Oid			langOid;
+	HeapTuple	langTup;
 	ObjectAddress object;
-
-	/*
-	 * Check permission
-	 */
-	if (!superuser())
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("must be superuser to drop procedural language")));
 
 	/*
 	 * Translate the language name, check that the language exists
 	 */
 	languageName = case_translate_language_name(stmt->plname);
 
-	langOid = caql_getoid_plus(
-			NULL,
-			&fetchCount,
-			NULL,
-			cql("SELECT oid FROM pg_language "
-				" WHERE lanname = :1 ",
-				CStringGetDatum(languageName)));
-
-	if (0 == fetchCount)
+	langTup = SearchSysCache(LANGNAME,
+							 CStringGetDatum(languageName),
+							 0, 0, 0);
+	if (!HeapTupleIsValid(langTup))
 	{
 		if (!stmt->missing_ok)
 			ereport(ERROR,
@@ -534,9 +560,18 @@ DropProceduralLanguage(DropPLangStmt *stmt)
 		return;
 	}
 
+	/*
+	 * Check permission
+	 */
+	if (!pg_language_ownercheck(HeapTupleGetOid(langTup), GetUserId()))
+		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_LANGUAGE,
+					   languageName);
+
 	object.classId = LanguageRelationId;
-	object.objectId = langOid;
+	object.objectId = HeapTupleGetOid(langTup);
 	object.objectSubId = 0;
+
+	ReleaseSysCache(langTup);
 
 	/*
 	 * Do the deletion
@@ -545,7 +580,11 @@ DropProceduralLanguage(DropPLangStmt *stmt)
 
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
-		CdbDispatchUtilityStatement((Node *) stmt, "DropProceduralLanguage");
+		CdbDispatchUtilityStatement((Node *) stmt,
+									DF_CANCEL_ON_ERROR|
+									DF_WITH_SNAPSHOT|
+									DF_NEED_TWO_PHASE,
+									NULL);
 	}
 }
 
@@ -555,16 +594,22 @@ DropProceduralLanguage(DropPLangStmt *stmt)
 void
 DropProceduralLanguageById(Oid langOid)
 {
-	if (!caql_getcount(
-				NULL,
-				cql("DELETE FROM pg_language "
-					" WHERE oid = :1 ",
-					ObjectIdGetDatum(langOid))))
-	{
-		/* should not happen */
-		elog(ERROR, "cache lookup failed for language %u", langOid);
-	}
+	Relation	rel;
+	HeapTuple	langTup;
 
+	rel = heap_open(LanguageRelationId, RowExclusiveLock);
+
+	langTup = SearchSysCache(LANGOID,
+							 ObjectIdGetDatum(langOid),
+							 0, 0, 0);
+	if (!HeapTupleIsValid(langTup))		/* should not happen */
+		elog(ERROR, "cache lookup failed for language %u", langOid);
+
+	simple_heap_delete(rel, &langTup->t_self);
+
+	ReleaseSysCache(langTup);
+
+	heap_close(rel, RowExclusiveLock);
 }
 
 /*
@@ -575,9 +620,6 @@ RenameLanguage(const char *oldname, const char *newname)
 {
 	HeapTuple	tup;
 	Relation	rel;
-	cqContext	cqc2;
-	cqContext	cqc;
-	cqContext  *pcqCtx;
 
 	/* Translate both names for consistency with CREATE */
 	oldname = case_translate_language_name(oldname);
@@ -585,42 +627,155 @@ RenameLanguage(const char *oldname, const char *newname)
 
 	rel = heap_open(LanguageRelationId, RowExclusiveLock);
 
-	pcqCtx = caql_addrel(cqclr(&cqc), rel);
-
-	tup = caql_getfirst(
-			pcqCtx,
-			cql("SELECT * FROM pg_language "
-				" WHERE lanname = :1 "
-				" FOR UPDATE ",
-				CStringGetDatum((char *) oldname)));
-
+	tup = SearchSysCacheCopy(LANGNAME,
+							 CStringGetDatum(oldname),
+							 0, 0, 0);
 	if (!HeapTupleIsValid(tup))
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_OBJECT),
 				 errmsg("language \"%s\" does not exist", oldname)));
 
 	/* make sure the new name doesn't exist */
-	if (caql_getcount(
-				caql_addrel(cqclr(&cqc2), rel),
-				cql("SELECT COUNT(*) FROM pg_language "
-					" WHERE lanname = :1 ",
-					CStringGetDatum((char *) newname))))
+	if (SearchSysCacheExists(LANGNAME,
+							 CStringGetDatum(newname),
+							 0, 0, 0))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_DUPLICATE_OBJECT),
 				 errmsg("language \"%s\" already exists", newname)));
 	}
 
-	/* must be superuser, since we do not have owners for PLs */
-	if (!superuser())
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("must be superuser to rename procedural language")));
+	/* must be owner of PL */
+	if (!pg_language_ownercheck(HeapTupleGetOid(tup), GetUserId()))
+		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_LANGUAGE,
+					   oldname);
 
 	/* rename */
 	namestrcpy(&(((Form_pg_language) GETSTRUCT(tup))->lanname), newname);
-	caql_update_current(pcqCtx, tup); /* implicit update of index as well */
+	simple_heap_update(rel, &tup->t_self, tup);
+	CatalogUpdateIndexes(rel, tup);
 
 	heap_close(rel, NoLock);
 	heap_freetuple(tup);
+}
+
+/*
+ * Change language owner
+ */
+void
+AlterLanguageOwner(const char *name, Oid newOwnerId)
+{
+	HeapTuple	tup;
+	Relation	rel;
+
+	/* Translate name for consistency with CREATE */
+	name = case_translate_language_name(name);
+
+	rel = heap_open(LanguageRelationId, RowExclusiveLock);
+
+	tup = SearchSysCache(LANGNAME,
+						 CStringGetDatum(name),
+						 0, 0, 0);
+	if (!HeapTupleIsValid(tup))
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("language \"%s\" does not exist", name)));
+
+	AlterLanguageOwner_internal(tup, rel, newOwnerId);
+	
+	ReleaseSysCache(tup);
+	
+	heap_close(rel, RowExclusiveLock);
+
+}
+
+/*
+ * Change language owner, specified by OID
+ */
+void
+AlterLanguageOwner_oid(Oid oid, Oid newOwnerId)
+{
+	HeapTuple	tup;
+	Relation	rel;
+
+	rel = heap_open(LanguageRelationId, RowExclusiveLock);
+
+	tup = SearchSysCache(LANGOID,
+						 ObjectIdGetDatum(oid),
+						 0, 0, 0);
+	if (!HeapTupleIsValid(tup))
+		elog(ERROR, "cache lookup failed for language %u", oid);
+
+	AlterLanguageOwner_internal(tup, rel, newOwnerId);
+
+	ReleaseSysCache(tup);
+
+	heap_close(rel, RowExclusiveLock);
+}
+
+/*
+ * Workhorse for AlterLanguageOwner variants
+ */
+static void
+AlterLanguageOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId)
+{
+	Form_pg_language lanForm;
+
+	lanForm = (Form_pg_language) GETSTRUCT(tup);
+
+	/*
+	 * If the new owner is the same as the existing owner, consider the
+	 * command to have succeeded.  This is for dump restoration purposes.
+	 */
+	if (lanForm->lanowner != newOwnerId)
+	{
+		Datum		repl_val[Natts_pg_language];
+		bool		repl_null[Natts_pg_language];
+		bool		repl_repl[Natts_pg_language];
+		Acl		   *newAcl;
+		Datum		aclDatum;
+		bool		isNull;
+		HeapTuple	newtuple;
+
+		/* Otherwise, must be owner of the existing object */
+		if (!pg_language_ownercheck(HeapTupleGetOid(tup), GetUserId()))
+			aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_LANGUAGE,
+						   NameStr(lanForm->lanname));
+
+		/* Must be able to become new owner */
+		check_is_member_of_role(GetUserId(), newOwnerId);
+
+		memset(repl_null, false, sizeof(repl_null));
+		memset(repl_repl, false, sizeof(repl_repl));
+
+		repl_repl[Anum_pg_language_lanowner - 1] = true;
+		repl_val[Anum_pg_language_lanowner - 1] = ObjectIdGetDatum(newOwnerId);
+
+		/*
+		 * Determine the modified ACL for the new owner.  This is only
+		 * necessary when the ACL is non-null.
+		 */
+		aclDatum = SysCacheGetAttr(LANGNAME, tup,
+								   Anum_pg_language_lanacl,
+								   &isNull);
+		if (!isNull)
+		{
+			newAcl = aclnewowner(DatumGetAclP(aclDatum),
+								 lanForm->lanowner, newOwnerId);
+			repl_repl[Anum_pg_language_lanacl - 1] = true;
+			repl_val[Anum_pg_language_lanacl - 1] = PointerGetDatum(newAcl);
+		}
+
+		newtuple = heap_modify_tuple(tup, RelationGetDescr(rel),
+									 repl_val, repl_null, repl_repl);
+
+		simple_heap_update(rel, &newtuple->t_self, newtuple);
+		CatalogUpdateIndexes(rel, newtuple);
+
+		heap_freetuple(newtuple);
+
+		/* Update owner dependency reference */
+		changeDependencyOnOwner(LanguageRelationId, HeapTupleGetOid(tup),
+								newOwnerId);
+	}
 }

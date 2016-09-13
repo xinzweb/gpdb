@@ -16,7 +16,7 @@
  * Portions Copyright (c) 2007-2008, Greenplum inc
  * Copyright (c) 2003-2008, PostgreSQL Global Development Group
  *
- * $PostgreSQL: pgsql/src/include/nodes/tidbitmap.h,v 1.3 2005/10/15 02:49:45 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/nodes/tidbitmap.h,v 1.6 2008/01/01 19:45:58 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -176,7 +176,6 @@ extern void tbm_bitmap_free(Node *bm);
 extern void tbm_bitmap_set_instrument(Node *bm, struct Instrumentation *instr);
 extern void tbm_bitmap_upd_instrument(Node *bm);
 
-extern void tbm_convert_appendonly_tid_in(AOTupleId *aoTid, ItemPointer psudeoHeapTid);
 extern void tbm_convert_appendonly_tid_out(ItemPointer psudeoHeapTid, AOTupleId *aoTid);
 
 #endif   /* TIDBITMAP_H */

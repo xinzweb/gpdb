@@ -9,7 +9,6 @@
  */
 
 #include "postgres.h"
-#include "catalog/catquery.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "commands/tablecmds.h"
@@ -601,30 +600,6 @@ static bool IsJoin(Node *node)
 }
 
 /**
- * Given a relation's Oid, return the oid of the type of its row
- */
-static Oid RelationGetTypeOid(Oid relationOid)
-{
-	int fetchCount;
-	Oid typeOid;
-
-	Assert(relationOid != InvalidOid);
-	typeOid = caql_getoid_plus(
-			NULL,
-			&fetchCount,
-			NULL,
-			cql("SELECT reltype FROM pg_class "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(relationOid)));
-
-	Assert(fetchCount);
-
-	Assert(typeOid != InvalidOid);
-
-	return typeOid;
-}
-
-/**
  * Convenience function to create a const node with a given oid value.
  */
 static Const* makeOidConst(Oid o)
@@ -667,7 +642,8 @@ static TargetEntry *ConstructAggTLE(PartitionJoinMutatorContext *ctx)
 	rexpr->colnames = NULL;
 	rexpr->location = -1;
 	rexpr->row_format = COERCE_DONTCARE;
-	rexpr->row_typeid = RelationGetTypeOid(ctx->partitionOid);
+	rexpr->row_typeid = get_rel_type_id(ctx->partitionOid);
+	Assert(rexpr->row_typeid != InvalidOid);
 
 	ListCell *lc = NULL;
 	foreach (lc, ctx->outerPlan->targetlist)
@@ -829,7 +805,7 @@ static void ConstructInitPlan(PartitionJoinMutatorContext *ctx)
 {
 	Assert(CurrentMemoryContext == ctx->callerCtx);
 
-	ctx->outerPlan = plan_pushdown_tlist(ctx->outerPlan, ctx->outerTargetList);
+	ctx->outerPlan = plan_pushdown_tlist(ctx->root, ctx->outerPlan, ctx->outerTargetList);
 
 	ctx->outerPlan = GatherToQD(ctx->outerPlan);
 
@@ -921,7 +897,7 @@ static Plan *TransformPartitionJoin(Plan *plan, PartitionJoinMutatorContext *ctx
 		saop->opfuncid = 184;
 		saop->useOr = true;
 
-		Result *result = make_result(child->targetlist, (Node *) list_make1(saop) /*resconstantqual */, child);
+		Result *result = make_result(ctx->root, child->targetlist, (Node *) list_make1(saop) /*resconstantqual */, child);
 		newChildren = lappend(newChildren, result);
 	}
 	append->appendplans = newChildren;
@@ -1304,7 +1280,7 @@ make_mergeclause(Node *outer, Node *inner)
 
 	xpr = make_notclause((Expr *) opxpr);
 
-	rinfo = make_restrictinfo(xpr, false, false, false, NULL);
+	rinfo = make_restrictinfo(xpr, false, false, false, NULL, NULL, NULL);
 	rinfo->mergeopfamilies = get_mergejoin_opfamilies(opxpr->opno);
 
 	return rinfo;

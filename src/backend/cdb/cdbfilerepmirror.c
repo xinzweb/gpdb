@@ -383,13 +383,8 @@ FileRepMirror_RunReceiver(void)
 									   spareField,
 									   FILEREP_UNDEFINED);	
 				
-#ifdef FAULT_INJECTOR
-				FaultInjector_InjectFaultIfSet(
-											   FileRepReceiver,
-											   DDLNotSpecified,
-											   "",	//databaseName
-											   ""); // tableName
-#endif				
+				SIMPLE_FAULT_INJECTOR(FileRepReceiver);
+
 				fileRepShmemMessageDescr = (FileRepShmemMessageDescr_s*) msgPositionInsert;	
 		
 				/* it is not in use */
@@ -701,13 +696,8 @@ FileRepMirror_RunConsumer(void)
 			break;
 		}
 			
-#ifdef FAULT_INJECTOR
-		FaultInjector_InjectFaultIfSet(
-									   FileRepConsumer,
-									   DDLNotSpecified,
-									   "",	//databaseName
-									   ""); // tableName
-#endif
+		SIMPLE_FAULT_INJECTOR(FileRepConsumer);
+
 		/* Calculate and compare FileRepMessageHeader_s Crc */
 		fileRepMessageHeader = (FileRepMessageHeader_s*) (fileRepShmem->positionConsume + 
 								  sizeof(FileRepShmemMessageDescr_s));
@@ -1334,13 +1324,8 @@ FileRepMirror_RunConsumer(void)
 						}
 				}
 				
-#ifdef FAULT_INJECTOR
-				FaultInjector_InjectFaultIfSet(
-											   FileRepFlush,
-											   DDLNotSpecified,
-											   "",	//databaseName
-											   ""); // tableName
-#endif								
+				SIMPLE_FAULT_INJECTOR(FileRepFlush);
+
 				gettimeofday(&currentTime, NULL);
 				beginTime = (pg_time_t) currentTime.tv_sec;
 				
@@ -1959,7 +1944,8 @@ FileRepMirror_RunConsumer(void)
 											   fileRepMessageHeader->messageCount),
 							 FileRep_errcontext()));		
 					
-					FileUnlink(fd);
+					SetDeleteOnExit(fd);
+					FileClose(fd);
 					FileRepMirror_RemoveFileName(newFileName);
 				}
 				fd = 0;
@@ -2621,7 +2607,8 @@ FileRepMirror_Drop(FileName fileName)
 		FileRepMirror_RemoveFileName(fileName);
 	}
 
-	FileUnlink(fd);
+	SetDeleteOnExit(fd);
+	FileClose(fd);
 	
 	return status;
 }

@@ -8,7 +8,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_depend.h,v 1.8 2007/01/05 22:19:52 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_depend.h,v 1.9 2008/01/01 19:45:56 momjian Exp $
  *
  * NOTES
  *	  the genbki.sh script reads this file and generates .bki
@@ -20,29 +20,6 @@
 #define PG_DEPEND_H
 
 #include "catalog/genbki.h"
-
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_depend
-   with (oid=false, relid=2608, content=SEGMENT_LOCAL)
-   (
-   classid      oid, 
-   objid        oid, 
-   objsubid     integer, 
-   refclassid   oid, 
-   refobjid     oid, 
-   refobjsubid  integer, 
-   deptype      "char"
-   );
-
-   create index on pg_depend(classid, objid, objsubid) with (indexid=2673, CamelCase=DependDepender);
-   create index on pg_depend(refclassid, refobjid, refobjsubid) with (indexid=2674, CamelCase=DependReference);
-
-   alter table pg_depend add fk classid on pg_class(oid);
-   alter table pg_depend add fk refclassid on pg_class(oid);
-
-   TIDYCAT_ENDFAKEDEF
-*/
 
 /* ----------------
  *		pg_depend definition.  cpp turns this into
@@ -75,6 +52,10 @@ CATALOG(pg_depend,2608) BKI_WITHOUT_OIDS
 	 */
 	char		deptype;		/* see codes in dependency.h */
 } FormData_pg_depend;
+
+/* GPDB added foreign key definitions for gpcheckcat. */
+FOREIGN_KEY(classid REFERENCES pg_class(oid));
+FOREIGN_KEY(refclassid REFERENCES pg_class(oid));
 
 /* ----------------
  *		Form_pg_depend corresponds to a pointer to a row with

@@ -1809,7 +1809,7 @@ url_fclose(URL_FILE *file, bool failOnError, const char *relname)
 
 				free(file);
 				if (!retVal)
-					elog(ERROR, "Error when close writable externtal table");
+					elog(ERROR, "Error when closing writable external table");
 			}
 #else
 			ereport(ERROR,
@@ -1831,7 +1831,7 @@ url_fclose(URL_FILE *file, bool failOnError, const char *relname)
 
 			break;
 			
-		default: /* unknown or supported type - oh dear */
+		default: /* unknown or unsupported type - oh dear */
 			free(file);
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
@@ -2118,7 +2118,7 @@ static size_t gp_proto1_read(char *buf, int bufsz, URL_FILE *file, CopyState pst
 			 */
 			memcpy(&line_number, curl->in.ptr + curl->in.bot, len);
 			line_number = local_ntohll(line_number);
-			pstate->cur_lineno = line_number ? line_number - 1 : (int64) - 1 << 63;
+			pstate->cur_lineno = line_number ? line_number - 1 : INT64_MIN;
 			curl->in.bot += 8;
 			Assert(curl->in.bot <= curl->in.top);
 			continue;

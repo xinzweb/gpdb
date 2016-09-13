@@ -64,10 +64,10 @@ typedef enum FileSegInfoState
  */
 #define Schema_pg_aoseg \
 { -1, {"segno"}, 				 23, -1, 4, 1, 0, -1, -1, true, 'p', 'i', false, false, false, true, 0 }, \
-{ -1, {"eof"},					701, -1, 8, 2, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
-{ -1, {"tupcount"},				701, -1, 8, 3, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
-{ -1, {"varblockcount"},		701, -1, 8, 4, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
-{ -1, {"eofuncompressed"},		701, -1, 8, 5, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
+{ -1, {"eof"},					 20, -1, 8, 2, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
+{ -1, {"tupcount"},				 20, -1, 8, 3, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
+{ -1, {"varblockcount"},		 20, -1, 8, 4, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
+{ -1, {"eofuncompressed"},		 20, -1, 8, 5, 0, -1, -1, true, 'p', 'd', false, false, false, true, 0 }, \
 { -1, {"modcount"}, 			 20, -1, 8, 6, 0, -1, -1, true, 'p', 'i', false, false, false, true, 0 }, \
 { -1, {"state"}, 				 21, -1, 2, 6, 0, -1, -1, true, 'p', 'i', false, false, false, true, 0 }
 
@@ -77,7 +77,7 @@ typedef enum FileSegInfoState
 #define Class_pg_aoseg \
   {"pg_appendonly"}, PG_CATALOG_NAMESPACE, -1, BOOTSTRAP_SUPERUSERID, 0, \
                -1, DEFAULTTABLESPACE_OID, \
-               25, 10000, 0, 0, 0, 0, false, false, RELKIND_RELATION, RELSTORAGE_HEAP, Natts_pg_aoseg, \
+               25, 10000, 0, 0, false, false, RELKIND_RELATION, RELSTORAGE_HEAP, Natts_pg_aoseg, \
                0, 0, 0, 0, 0, false, false, false, false, FirstNormalTransactionId, {0}, {{{'\0','\0','\0','\0'},{'\0'}}}
 
 
@@ -147,8 +147,7 @@ typedef enum
 
 extern FileSegInfo *NewFileSegInfo(int segno);
 
-extern void 
-InsertInitialSegnoEntry(AppendOnlyEntry *aoEntry, int segno);
+extern void InsertInitialSegnoEntry(Relation parentrel, int segno);
  
  /*
   * GetFileSegInfo
@@ -164,16 +163,15 @@ InsertInitialSegnoEntry(AppendOnlyEntry *aoEntry, int segno);
   * to append data to the segment file.
   */
 extern FileSegInfo *
-GetFileSegInfo(Relation parentrel, AppendOnlyEntry *aoEntry, Snapshot appendOnlyMetaDataSnapshot, int segno);
+GetFileSegInfo(Relation parentrel, Snapshot appendOnlyMetaDataSnapshot, int segno);
 
 extern FileSegInfo **
-GetAllFileSegInfo(Relation parentrel, AppendOnlyEntry *aoEntry, Snapshot appendOnlyMetaDataSnapshot, int *totalsegs);
+GetAllFileSegInfo(Relation parentrel, Snapshot appendOnlyMetaDataSnapshot, int *totalsegs);
 
 extern FileSegInfo **
-GetAllFileSegInfo_pg_aoseg_rel(char *relationName, AppendOnlyEntry *aoEntry, Relation pg_aoseg_rel, Snapshot appendOnlyMetaDataSnapshot, int *totalsegs);
+GetAllFileSegInfo_pg_aoseg_rel(char *relationName, Relation pg_aoseg_rel, Snapshot appendOnlyMetaDataSnapshot, int *totalsegs);
 
 extern void UpdateFileSegInfo(Relation parentrel,
-				  AppendOnlyEntry *aoEntry,
 				  int segno,
 				  int64 eof,
 				  int64 eof_uncompressed,
@@ -182,8 +180,8 @@ extern void UpdateFileSegInfo(Relation parentrel,
 				  int64 modcount_added,
 				  FileSegInfoState newState);
 
-extern void ClearFileSegInfo(Relation parentrel, AppendOnlyEntry *aoEntry, int segno, FileSegInfoState newState);
-extern void SetFileSegInfoState(Relation parentrel, AppendOnlyEntry *aoEntry, int segno, FileSegInfoState newState);
+extern void ClearFileSegInfo(Relation parentrel, int segno, FileSegInfoState newState);
+extern void SetFileSegInfoState(Relation parentrel, int segno, FileSegInfoState newState);
 extern FileSegTotals *
 GetSegFilesTotals(Relation parentrel, Snapshot appendOnlyMetaDataSnapshot);
 

@@ -14,16 +14,16 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/utils/misc/superuser.c,v 1.36 2007/01/05 22:19:46 momjian Exp $
+ *	  $PostgreSQL: pgsql/src/backend/utils/misc/superuser.c,v 1.38 2008/09/09 18:58:08 tgl Exp $
  *
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
 
-#include "catalog/catquery.h"
 #include "catalog/pg_authid.h"
 #include "utils/inval.h"
 #include "utils/syscache.h"
+#include "storage/proc.h"
 #include "miscadmin.h"
 
 
@@ -37,7 +37,7 @@ static Oid	last_roleid = InvalidOid;	/* InvalidOid == cache not valid */
 static bool last_roleid_is_super = false;
 static bool roleid_callback_registered = false;
 
-static void RoleidCallback(Datum arg, Oid relid);
+static void RoleidCallback(Datum arg, int cacheid, ItemPointer tuplePtr);
 
 
 /*
@@ -49,6 +49,14 @@ superuser(void)
 	return superuser_arg(GetUserId());
 }
 
+/*
+ * Is my role id a super user.
+ */
+bool
+procRoleIsSuperuser(void)
+{
+	return superuser_arg(MyProc->roleId);
+}
 
 /*
  * The specified role has Postgres superuser privileges
@@ -56,9 +64,8 @@ superuser(void)
 bool
 superuser_arg(Oid roleid)
 {
-	bool		result = false;
+	bool		result;
 	HeapTuple	rtup;
-	cqContext  *pcqCtx;
 
 	/* Quick out for cache hit */
 	if (OidIsValid(last_roleid) && last_roleid == roleid)
@@ -69,20 +76,19 @@ superuser_arg(Oid roleid)
 		return true;
 
 	/* OK, look up the information in pg_authid */
-
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_authid "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(roleid)));
-
-	rtup = caql_getnext(pcqCtx);
-
+	rtup = SearchSysCache(AUTHOID,
+						  ObjectIdGetDatum(roleid),
+						  0, 0, 0);
 	if (HeapTupleIsValid(rtup))
+	{
 		result = ((Form_pg_authid) GETSTRUCT(rtup))->rolsuper;
-	/* else Report "not superuser" for invalid roleids */
-
-	caql_endscan(pcqCtx);
+		ReleaseSysCache(rtup);
+	}
+	else
+	{
+		/* Report "not superuser" for invalid roleids */
+		result = false;
+	}
 
 	/* If first time through, set up callback for cache flushes */
 	if (!roleid_callback_registered)
@@ -105,7 +111,7 @@ superuser_arg(Oid roleid)
  *		Syscache inval callback function
  */
 static void
-RoleidCallback(Datum arg, Oid relid)
+RoleidCallback(Datum arg, int cacheid, ItemPointer tuplePtr)
 {
 	/* Invalidate our local cache in case role's superuserness changed */
 	last_roleid = InvalidOid;

@@ -10,7 +10,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/bootstrap/bootparse.y,v 1.86 2007/01/09 02:14:11 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/bootstrap/bootparse.y,v 1.91 2008/01/01 19:45:48 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -27,12 +27,6 @@
 #include "access/xact.h"
 #include "bootstrap/bootstrap.h"
 #include "catalog/catalog.h"
-#include "catalog/gp_configuration.h"
-#include "catalog/gp_persistent.h"
-#include "catalog/gp_global_sequence.h"
-#include "catalog/gp_fastsequence.h"
-#include "catalog/gp_san_config.h"
-#include "catalog/gp_segment_config.h"
 #include "catalog/heap.h"
 #include "catalog/pg_am.h"
 #include "catalog/pg_attribute.h"
@@ -40,15 +34,9 @@
 #include "catalog/pg_auth_members.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_database.h"
-#include "catalog/pg_extprotocol.h"
 #include "catalog/pg_filespace.h"
-#include "catalog/pg_filespace_entry.h"
 #include "catalog/pg_namespace.h"
-#include "catalog/pg_resqueue.h"
-#include "catalog/pg_statistic.h"
 #include "catalog/pg_tablespace.h"
-#include "catalog/pg_type.h"
-#include "catalog/pg_tidycat.h"
 #include "catalog/toasting.h"
 #include "commands/defrem.h"
 #include "miscadmin.h"
@@ -340,7 +328,7 @@ Boot_DeclareIndexStmt:
 								LexIDStr($8),
 								NULL,
 								$10,
-								NULL, NIL, NIL,
+								NULL, NIL,
 								false, false, false,
 								false, false, true, false, false,
 								false, NULL);
@@ -359,7 +347,7 @@ Boot_DeclareUniqueIndexStmt:
 								LexIDStr($9),
 								NULL,
 								$11,
-								NULL, NIL, NIL,
+								NULL, NIL,
 								true, false, false,
 								false, false, true, false, false,
 								false,

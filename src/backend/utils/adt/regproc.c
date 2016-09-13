@@ -13,7 +13,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/utils/adt/regproc.c,v 1.100 2007/01/05 22:19:41 momjian Exp $
+ *	  $PostgreSQL: pgsql/src/backend/utils/adt/regproc.c,v 1.105 2008/01/01 19:45:52 momjian Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -23,11 +23,12 @@
 
 #include "access/genam.h"
 #include "access/heapam.h"
-#include "catalog/catquery.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_ts_config.h"
+#include "catalog/pg_ts_dict.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "parser/parse_type.h"
@@ -36,8 +37,7 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 
-static void parseNameAndArgTypes(const char *string, const char *caller,
-					 bool allowNone,
+static void parseNameAndArgTypes(const char *string, bool allowNone,
 					 List **names, int *nargs, Oid *argtypes);
 
 
@@ -86,15 +86,29 @@ regprocin(PG_FUNCTION_ARGS)
 	if (IsBootstrapProcessingMode())
 	{
 		int			matches = 0;
+		Relation	hdesc;
+		ScanKeyData skey[1];
+		SysScanDesc sysscan;
+		HeapTuple	tuple;
 
-		result = 
-				(RegProcedure) caql_getoid_plus(
-						NULL,
-						&matches,
-						NULL,
-						cql("SELECT oid FROM pg_proc "
-							" WHERE proname = :1 ",
-							CStringGetDatum(pro_name_or_oid)));
+		ScanKeyInit(&skey[0],
+					Anum_pg_proc_proname,
+					BTEqualStrategyNumber, F_NAMEEQ,
+					CStringGetDatum(pro_name_or_oid));
+
+		hdesc = heap_open(ProcedureRelationId, AccessShareLock);
+		sysscan = systable_beginscan(hdesc, ProcedureNameArgsNspIndexId, true,
+									 SnapshotNow, 1, skey);
+
+		while (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
+		{
+			result = (RegProcedure) HeapTupleGetOid(tuple);
+			if (++matches > 1)
+				break;
+		}
+
+		systable_endscan(sysscan);
+		heap_close(hdesc, AccessShareLock);
 
 		if (matches == 0)
 			ereport(ERROR,
@@ -114,7 +128,7 @@ regprocin(PG_FUNCTION_ARGS)
 	 * Normal case: parse the name into components and see if it matches any
 	 * pg_proc entries in the current search path.
 	 */
-	names = stringToQualifiedNameList(pro_name_or_oid, "regprocin");
+	names = stringToQualifiedNameList(pro_name_or_oid);
 	clist = FuncnameGetCandidates(names, -1, false, false);
 
 	if (clist == NULL)
@@ -141,7 +155,6 @@ regprocout(PG_FUNCTION_ARGS)
 	RegProcedure proid = PG_GETARG_OID(0);
 	char	   *result;
 	HeapTuple	proctup;
-	cqContext  *pcqCtx;
 
 	if (proid == InvalidOid)
 	{
@@ -149,15 +162,10 @@ regprocout(PG_FUNCTION_ARGS)
 		PG_RETURN_CSTRING(result);
 	}
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_proc "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(proid)));
+	proctup = SearchSysCache(PROCOID,
+							 ObjectIdGetDatum(proid),
+							 0, 0, 0);
 
-	proctup = caql_getnext(pcqCtx);
-
-	/* XXX XXX select proname, pronamespace from pg_proc */
 	if (HeapTupleIsValid(proctup))
 	{
 		Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
@@ -188,6 +196,8 @@ regprocout(PG_FUNCTION_ARGS)
 
 			result = quote_qualified_identifier(nspname, proname);
 		}
+
+		ReleaseSysCache(proctup);
 	}
 	else
 	{
@@ -195,8 +205,6 @@ regprocout(PG_FUNCTION_ARGS)
 		result = (char *) palloc(NAMEDATALEN);
 		snprintf(result, NAMEDATALEN, "%u", proid);
 	}
-
-	caql_endscan(pcqCtx);
 
 	PG_RETURN_CSTRING(result);
 }
@@ -264,8 +272,7 @@ regprocedurein(PG_FUNCTION_ARGS)
 	 * datatype cannot be used for any system column that needs to receive
 	 * data during bootstrap.
 	 */
-	parseNameAndArgTypes(pro_name_or_oid, "regprocedurein", false,
-						 &names, &nargs, argtypes);
+	parseNameAndArgTypes(pro_name_or_oid, false, &names, &nargs, argtypes);
 
 	clist = FuncnameGetCandidates(names, nargs, false, false);
 
@@ -296,17 +303,11 @@ format_procedure(Oid procedure_oid)
 {
 	char	   *result;
 	HeapTuple	proctup;
-	cqContext  *pcqCtx;
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_proc "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(procedure_oid)));
+	proctup = SearchSysCache(PROCOID,
+							 ObjectIdGetDatum(procedure_oid),
+							 0, 0, 0);
 
-	proctup = caql_getnext(pcqCtx);
-
-	/* XXX XXX select proname, pronamespace from pg_proc */
 	if (HeapTupleIsValid(proctup))
 	{
 		Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
@@ -343,6 +344,7 @@ format_procedure(Oid procedure_oid)
 
 		result = buf.data;
 
+		ReleaseSysCache(proctup);
 	}
 	else
 	{
@@ -350,8 +352,6 @@ format_procedure(Oid procedure_oid)
 		result = (char *) palloc(NAMEDATALEN);
 		snprintf(result, NAMEDATALEN, "%u", procedure_oid);
 	}
-
-	caql_endscan(pcqCtx);
 
 	return result;
 }
@@ -435,16 +435,26 @@ regoperin(PG_FUNCTION_ARGS)
 	if (IsBootstrapProcessingMode())
 	{
 		int			matches = 0;
+		Relation	hdesc;
+		ScanKeyData skey[1];
+		SysScanDesc sysscan;
+		HeapTuple	tuple;
 
-		result = 
-				caql_getoid_plus(
-						NULL,
-						&matches,
-						NULL,
-						cql("SELECT oid FROM pg_operator "
-							" WHERE oprname = :1 ",
-							CStringGetDatum(opr_name_or_oid)));
+		ScanKeyInit(&skey[0],
+					Anum_pg_operator_oprname,
+					BTEqualStrategyNumber, F_NAMEEQ,
+					CStringGetDatum(opr_name_or_oid));
 
+		hdesc = heap_open(OperatorRelationId, AccessShareLock);
+		sysscan = systable_beginscan(hdesc, OperatorNameNspIndexId, true,
+									 SnapshotNow, 1, skey);
+
+		while (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
+		{
+			result = (RegProcedure) HeapTupleGetOid(tuple);
+			if (++matches > 1)
+				break;
+		}
 		if (matches == 0)
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_FUNCTION),
@@ -462,7 +472,7 @@ regoperin(PG_FUNCTION_ARGS)
 	 * Normal case: parse the name into components and see if it matches any
 	 * pg_operator entries in the current search path.
 	 */
-	names = stringToQualifiedNameList(opr_name_or_oid, "regoperin");
+	names = stringToQualifiedNameList(opr_name_or_oid);
 	clist = OpernameGetCandidates(names, '\0');
 
 	if (clist == NULL)
@@ -489,7 +499,6 @@ regoperout(PG_FUNCTION_ARGS)
 	Oid			oprid = PG_GETARG_OID(0);
 	char	   *result;
 	HeapTuple	opertup;
-	cqContext  *pcqCtx;
 
 	if (oprid == InvalidOid)
 	{
@@ -497,15 +506,10 @@ regoperout(PG_FUNCTION_ARGS)
 		PG_RETURN_CSTRING(result);
 	}
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_operator "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(oprid)));
+	opertup = SearchSysCache(OPEROID,
+							 ObjectIdGetDatum(oprid),
+							 0, 0, 0);
 
-	opertup = caql_getnext(pcqCtx);
-
-	/* XXX XXX select oprname, oprnamespace from pg_operator */
 	if (HeapTupleIsValid(opertup))
 	{
 		Form_pg_operator operform = (Form_pg_operator) GETSTRUCT(opertup);
@@ -541,6 +545,8 @@ regoperout(PG_FUNCTION_ARGS)
 				sprintf(result, "%s.%s", nspname, oprname);
 			}
 		}
+
+		ReleaseSysCache(opertup);
 	}
 	else
 	{
@@ -550,8 +556,6 @@ regoperout(PG_FUNCTION_ARGS)
 		result = (char *) palloc(NAMEDATALEN);
 		snprintf(result, NAMEDATALEN, "%u", oprid);
 	}
-
-	caql_endscan(pcqCtx);
 
 	PG_RETURN_CSTRING(result);
 }
@@ -618,8 +622,7 @@ regoperatorin(PG_FUNCTION_ARGS)
 	 * datatype cannot be used for any system column that needs to receive
 	 * data during bootstrap.
 	 */
-	parseNameAndArgTypes(opr_name_or_oid, "regoperatorin", true,
-						 &names, &nargs, argtypes);
+	parseNameAndArgTypes(opr_name_or_oid, true, &names, &nargs, argtypes);
 	if (nargs == 1)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_PARAMETER),
@@ -652,17 +655,11 @@ format_operator(Oid operator_oid)
 {
 	char	   *result;
 	HeapTuple	opertup;
-	cqContext  *pcqCtx;
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_operator "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(operator_oid)));
+	opertup = SearchSysCache(OPEROID,
+							 ObjectIdGetDatum(operator_oid),
+							 0, 0, 0);
 
-	opertup = caql_getnext(pcqCtx);
-
-	/* XXX XXX select oprname, oprnamespace from pg_operator */
 	if (HeapTupleIsValid(opertup))
 	{
 		Form_pg_operator operform = (Form_pg_operator) GETSTRUCT(opertup);
@@ -700,6 +697,8 @@ format_operator(Oid operator_oid)
 			appendStringInfo(&buf, "NONE)");
 
 		result = buf.data;
+
+		ReleaseSysCache(opertup);
 	}
 	else
 	{
@@ -709,8 +708,6 @@ format_operator(Oid operator_oid)
 		result = (char *) palloc(NAMEDATALEN);
 		snprintf(result, NAMEDATALEN, "%u", operator_oid);
 	}
-
-	caql_endscan(pcqCtx);
 
 	return result;
 }
@@ -792,24 +789,31 @@ regclassin(PG_FUNCTION_ARGS)
 	 */
 	if (IsBootstrapProcessingMode())
 	{
-		int			matches = 0;
+		Relation	hdesc;
+		ScanKeyData skey[1];
+		SysScanDesc sysscan;
+		HeapTuple	tuple;
 
-		result = 
-				caql_getoid_plus(
-						NULL,
-						&matches,
-						NULL,
-						cql("SELECT oid FROM pg_class "
-							" WHERE relname = :1 ",
-							CStringGetDatum(class_name_or_oid)));
-		if (0 == matches)
-		{
+		ScanKeyInit(&skey[0],
+					Anum_pg_class_relname,
+					BTEqualStrategyNumber, F_NAMEEQ,
+					CStringGetDatum(class_name_or_oid));
+
+		hdesc = heap_open(RelationRelationId, AccessShareLock);
+		sysscan = systable_beginscan(hdesc, ClassNameNspIndexId, true,
+									 SnapshotNow, 1, skey);
+
+		if (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
+			result = HeapTupleGetOid(tuple);
+		else
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_TABLE),
 			   errmsg("relation \"%s\" does not exist", class_name_or_oid)));
-		}
 
 		/* We assume there can be only one match */
+
+		systable_endscan(sysscan);
+		heap_close(hdesc, AccessShareLock);
 
 		PG_RETURN_OID(result);
 	}
@@ -818,7 +822,7 @@ regclassin(PG_FUNCTION_ARGS)
 	 * Normal case: parse the name into components and see if it matches any
 	 * pg_class entries in the current search path.
 	 */
-	names = stringToQualifiedNameList(class_name_or_oid, "regclassin");
+	names = stringToQualifiedNameList(class_name_or_oid);
 
 	result = RangeVarGetRelid(makeRangeVarFromNameList(names), false);
 
@@ -834,7 +838,6 @@ regclassout(PG_FUNCTION_ARGS)
 	Oid			classid = PG_GETARG_OID(0);
 	char	   *result;
 	HeapTuple	classtup;
-	cqContext  *pcqCtx;
 
 	if (classid == InvalidOid)
 	{
@@ -842,15 +845,10 @@ regclassout(PG_FUNCTION_ARGS)
 		PG_RETURN_CSTRING(result);
 	}
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_class "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(classid)));
+	classtup = SearchSysCache(RELOID,
+							  ObjectIdGetDatum(classid),
+							  0, 0, 0);
 
-	classtup = caql_getnext(pcqCtx);
-
-	/* XXX XXX select relname, relnamespace from pg_class */
 	if (HeapTupleIsValid(classtup))
 	{
 		Form_pg_class classform = (Form_pg_class) GETSTRUCT(classtup);
@@ -877,6 +875,8 @@ regclassout(PG_FUNCTION_ARGS)
 
 			result = quote_qualified_identifier(nspname, classname);
 		}
+
+		ReleaseSysCache(classtup);
 	}
 	else
 	{
@@ -884,8 +884,6 @@ regclassout(PG_FUNCTION_ARGS)
 		result = (char *) palloc(NAMEDATALEN);
 		snprintf(result, NAMEDATALEN, "%u", classid);
 	}
-
-	caql_endscan(pcqCtx);
 
 	PG_RETURN_CSTRING(result);
 }
@@ -956,24 +954,31 @@ regtypein(PG_FUNCTION_ARGS)
 	 */
 	if (IsBootstrapProcessingMode())
 	{
-		int			matches = 0;
+		Relation	hdesc;
+		ScanKeyData skey[1];
+		SysScanDesc sysscan;
+		HeapTuple	tuple;
 
-		result = 
-				caql_getoid_plus(
-						NULL,
-						&matches,
-						NULL,
-						cql("SELECT oid FROM pg_type "
-							" WHERE typname = :1 ",
-							CStringGetDatum(typ_name_or_oid)));
-		if (0 == matches)
-		{
+		ScanKeyInit(&skey[0],
+					Anum_pg_type_typname,
+					BTEqualStrategyNumber, F_NAMEEQ,
+					CStringGetDatum(typ_name_or_oid));
+
+		hdesc = heap_open(TypeRelationId, AccessShareLock);
+		sysscan = systable_beginscan(hdesc, TypeNameNspIndexId, true,
+									 SnapshotNow, 1, skey);
+
+		if (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
+			result = HeapTupleGetOid(tuple);
+		else
 			ereport(ERROR,
 					(errcode(ERRCODE_UNDEFINED_OBJECT),
 					 errmsg("type \"%s\" does not exist", typ_name_or_oid)));
-		}
 
 		/* We assume there can be only one match */
+
+		systable_endscan(sysscan);
+		heap_close(hdesc, AccessShareLock);
 
 		PG_RETURN_OID(result);
 	}
@@ -994,8 +999,8 @@ Datum
 regtypeout(PG_FUNCTION_ARGS)
 {
 	Oid			typid = PG_GETARG_OID(0);
-	char	   *result = NULL;
-	int			fetchCount;
+	char	   *result;
+	HeapTuple	typetup;
 
 	if (typid == InvalidOid)
 	{
@@ -1003,26 +1008,29 @@ regtypeout(PG_FUNCTION_ARGS)
 		PG_RETURN_CSTRING(result);
 	}
 
-	result = caql_getcstring_plus(
-			NULL,
-			&fetchCount,
-			NULL,
-			cql("SELECT typname FROM pg_type "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(typid)));
+	typetup = SearchSysCache(TYPEOID,
+							 ObjectIdGetDatum(typid),
+							 0, 0, 0);
 
-	if (fetchCount)
+	if (HeapTupleIsValid(typetup))
 	{
+		Form_pg_type typeform = (Form_pg_type) GETSTRUCT(typetup);
+
 		/*
 		 * In bootstrap mode, skip the fancy namespace stuff and just return
 		 * the type name.  (This path is only needed for debugging output
 		 * anyway.)
 		 */
-		if (!IsBootstrapProcessingMode())
+		if (IsBootstrapProcessingMode())
 		{
-			if (result) pfree(result);
-			result = format_type_be(typid);
+			char	   *typname = NameStr(typeform->typname);
+
+			result = pstrdup(typname);
 		}
+		else
+			result = format_type_be(typid);
+
+		ReleaseSysCache(typetup);
 	}
 	else
 	{
@@ -1055,7 +1063,233 @@ regtypesend(PG_FUNCTION_ARGS)
 }
 
 /*
+ * regconfigin		- converts "tsconfigname" to tsconfig OID
+ *
+ * We also accept a numeric OID, for symmetry with the output routine.
+ *
+ * '-' signifies unknown (OID 0).  In all other cases, the input must
+ * match an existing pg_ts_config entry.
+ *
+ * This function is not needed in bootstrap mode, so we don't worry about
+ * making it work then.
+ */
+Datum
+regconfigin(PG_FUNCTION_ARGS)
+{
+	char	   *cfg_name_or_oid = PG_GETARG_CSTRING(0);
+	Oid			result;
+	List	   *names;
+
+	/* '-' ? */
+	if (strcmp(cfg_name_or_oid, "-") == 0)
+		PG_RETURN_OID(InvalidOid);
+
+	/* Numeric OID? */
+	if (cfg_name_or_oid[0] >= '0' &&
+		cfg_name_or_oid[0] <= '9' &&
+		strspn(cfg_name_or_oid, "0123456789") == strlen(cfg_name_or_oid))
+	{
+		result = DatumGetObjectId(DirectFunctionCall1(oidin,
+										  CStringGetDatum(cfg_name_or_oid)));
+		PG_RETURN_OID(result);
+	}
+
+	/*
+	 * Normal case: parse the name into components and see if it matches any
+	 * pg_ts_config entries in the current search path.
+	 */
+	names = stringToQualifiedNameList(cfg_name_or_oid);
+
+	result = TSConfigGetCfgid(names, false);
+
+	PG_RETURN_OID(result);
+}
+
+/*
+ * regconfigout		- converts tsconfig OID to "tsconfigname"
+ */
+Datum
+regconfigout(PG_FUNCTION_ARGS)
+{
+	Oid			cfgid = PG_GETARG_OID(0);
+	char	   *result;
+	HeapTuple	cfgtup;
+
+	if (cfgid == InvalidOid)
+	{
+		result = pstrdup("-");
+		PG_RETURN_CSTRING(result);
+	}
+
+	cfgtup = SearchSysCache(TSCONFIGOID,
+							ObjectIdGetDatum(cfgid),
+							0, 0, 0);
+
+	if (HeapTupleIsValid(cfgtup))
+	{
+		Form_pg_ts_config cfgform = (Form_pg_ts_config) GETSTRUCT(cfgtup);
+		char	   *cfgname = NameStr(cfgform->cfgname);
+		char	   *nspname;
+
+		/*
+		 * Would this config be found by regconfigin? If not, qualify it.
+		 */
+		if (TSConfigIsVisible(cfgid))
+			nspname = NULL;
+		else
+			nspname = get_namespace_name(cfgform->cfgnamespace);
+
+		result = quote_qualified_identifier(nspname, cfgname);
+
+		ReleaseSysCache(cfgtup);
+	}
+	else
+	{
+		/* If OID doesn't match any pg_ts_config row, return it numerically */
+		result = (char *) palloc(NAMEDATALEN);
+		snprintf(result, NAMEDATALEN, "%u", cfgid);
+	}
+
+	PG_RETURN_CSTRING(result);
+}
+
+/*
+ *		regconfigrecv			- converts external binary format to regconfig
+ */
+Datum
+regconfigrecv(PG_FUNCTION_ARGS)
+{
+	/* Exactly the same as oidrecv, so share code */
+	return oidrecv(fcinfo);
+}
+
+/*
+ *		regconfigsend			- converts regconfig to binary format
+ */
+Datum
+regconfigsend(PG_FUNCTION_ARGS)
+{
+	/* Exactly the same as oidsend, so share code */
+	return oidsend(fcinfo);
+}
+
+
+/*
+ * regdictionaryin		- converts "tsdictionaryname" to tsdictionary OID
+ *
+ * We also accept a numeric OID, for symmetry with the output routine.
+ *
+ * '-' signifies unknown (OID 0).  In all other cases, the input must
+ * match an existing pg_ts_dict entry.
+ *
+ * This function is not needed in bootstrap mode, so we don't worry about
+ * making it work then.
+ */
+Datum
+regdictionaryin(PG_FUNCTION_ARGS)
+{
+	char	   *dict_name_or_oid = PG_GETARG_CSTRING(0);
+	Oid			result;
+	List	   *names;
+
+	/* '-' ? */
+	if (strcmp(dict_name_or_oid, "-") == 0)
+		PG_RETURN_OID(InvalidOid);
+
+	/* Numeric OID? */
+	if (dict_name_or_oid[0] >= '0' &&
+		dict_name_or_oid[0] <= '9' &&
+		strspn(dict_name_or_oid, "0123456789") == strlen(dict_name_or_oid))
+	{
+		result = DatumGetObjectId(DirectFunctionCall1(oidin,
+										 CStringGetDatum(dict_name_or_oid)));
+		PG_RETURN_OID(result);
+	}
+
+	/*
+	 * Normal case: parse the name into components and see if it matches any
+	 * pg_ts_dict entries in the current search path.
+	 */
+	names = stringToQualifiedNameList(dict_name_or_oid);
+
+	result = TSDictionaryGetDictid(names, false);
+
+	PG_RETURN_OID(result);
+}
+
+/*
+ * regdictionaryout		- converts tsdictionary OID to "tsdictionaryname"
+ */
+Datum
+regdictionaryout(PG_FUNCTION_ARGS)
+{
+	Oid			dictid = PG_GETARG_OID(0);
+	char	   *result;
+	HeapTuple	dicttup;
+
+	if (dictid == InvalidOid)
+	{
+		result = pstrdup("-");
+		PG_RETURN_CSTRING(result);
+	}
+
+	dicttup = SearchSysCache(TSDICTOID,
+							 ObjectIdGetDatum(dictid),
+							 0, 0, 0);
+
+	if (HeapTupleIsValid(dicttup))
+	{
+		Form_pg_ts_dict dictform = (Form_pg_ts_dict) GETSTRUCT(dicttup);
+		char	   *dictname = NameStr(dictform->dictname);
+		char	   *nspname;
+
+		/*
+		 * Would this dictionary be found by regdictionaryin? If not, qualify
+		 * it.
+		 */
+		if (TSDictionaryIsVisible(dictid))
+			nspname = NULL;
+		else
+			nspname = get_namespace_name(dictform->dictnamespace);
+
+		result = quote_qualified_identifier(nspname, dictname);
+
+		ReleaseSysCache(dicttup);
+	}
+	else
+	{
+		/* If OID doesn't match any pg_ts_dict row, return it numerically */
+		result = (char *) palloc(NAMEDATALEN);
+		snprintf(result, NAMEDATALEN, "%u", dictid);
+	}
+
+	PG_RETURN_CSTRING(result);
+}
+
+/*
+ *		regdictionaryrecv	- converts external binary format to regdictionary
+ */
+Datum
+regdictionaryrecv(PG_FUNCTION_ARGS)
+{
+	/* Exactly the same as oidrecv, so share code */
+	return oidrecv(fcinfo);
+}
+
+/*
+ *		regdictionarysend	- converts regdictionary to binary format
+ */
+Datum
+regdictionarysend(PG_FUNCTION_ARGS)
+{
+	/* Exactly the same as oidsend, so share code */
+	return oidsend(fcinfo);
+}
+
+
+/*
  * text_regclass: convert text to regclass
+ *
  * This could be replaced by CoerceViaIO, except that we need to treat
  * text-to-regclass as an implicit cast to support legacy forms of nextval()
  * and related functions.
@@ -1078,7 +1312,7 @@ text_regclass(PG_FUNCTION_ARGS)
  * Given a C string, parse it into a qualified-name list.
  */
 List *
-stringToQualifiedNameList(const char *string, const char *caller)
+stringToQualifiedNameList(const char *string)
 {
 	char	   *rawname;
 	List	   *result = NIL;
@@ -1126,9 +1360,8 @@ stringToQualifiedNameList(const char *string, const char *caller)
  * for unary operators).
  */
 static void
-parseNameAndArgTypes(const char *string, const char *caller,
-					 bool allowNone,
-					 List **names, int *nargs, Oid *argtypes)
+parseNameAndArgTypes(const char *string, bool allowNone, List **names,
+					 int *nargs, Oid *argtypes)
 {
 	char	   *rawname;
 	char	   *ptr;
@@ -1159,7 +1392,7 @@ parseNameAndArgTypes(const char *string, const char *caller,
 
 	/* Separate the name and parse it into a list */
 	*ptr++ = '\0';
-	*names = stringToQualifiedNameList(rawname, caller);
+	*names = stringToQualifiedNameList(rawname);
 
 	/* Check for the trailing right parenthesis and remove it */
 	ptr2 = ptr + strlen(ptr);

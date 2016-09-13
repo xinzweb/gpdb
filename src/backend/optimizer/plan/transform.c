@@ -20,6 +20,7 @@
 #include "parser/parse_coerce.h"
 #include "lib/stringinfo.h"
 #include "catalog/pg_operator.h"
+#include "utils/fmgroids.h"
 
 /**
  * Static declarations
@@ -39,14 +40,15 @@ static void wrap_vars_with_fieldselect(List *targetlist, int varno, Oid newvarty
 /**
  * Preprocess query structure for consumption by the optimizer
  */
-Query *preprocess_query_optimizer(Query *query, ParamListInfo boundParams)
+Query *
+preprocess_query_optimizer(PlannerGlobal *glob, Query *query, ParamListInfo boundParams)
 {
 #ifdef USE_ASSERT_CHECKING
 	Query *qcopy = (Query *) copyObject(query);
 #endif
 
 	/* fold all constant expressions */
-	Query *res = fold_constants(query, boundParams, GPOPT_MAX_FOLDED_CONSTANT_SIZE);
+	Query *res = fold_constants(glob, query, boundParams, GPOPT_MAX_FOLDED_CONSTANT_SIZE);
 
 #ifdef USE_ASSERT_CHECKING
 	Assert(equal(qcopy, query) && "Preprocessing should not modify original query object");
@@ -301,7 +303,7 @@ static bool is_sirv_funcexpr(FuncExpr *fe)
 	 * Function cannot be sequence related
 	 */
 	Oid funcid = fe->funcid;
-	res = res && !(funcid == NEXTVAL_FUNC_OID || funcid == CURRVAL_FUNC_OID || funcid == SETVAL_FUNC_OID);
+	res = res && !(funcid == F_NEXTVAL_OID || funcid == F_CURRVAL_OID || funcid == F_SETVAL_OID);
 
 	return res;
 }

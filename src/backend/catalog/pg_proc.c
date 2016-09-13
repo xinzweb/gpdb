@@ -8,7 +8,7 @@
  *
  *
  * IDENTIFICATION
- *	  $PostgreSQL: pgsql/src/backend/catalog/pg_proc.c,v 1.143 2007/01/22 01:35:20 tgl Exp $
+ *	  $PostgreSQL: pgsql/src/backend/catalog/pg_proc.c,v 1.148.2.2 2010/05/11 04:57:51 itagaki Exp $
  *
  *-------------------------------------------------------------------------
  */
@@ -17,7 +17,6 @@
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/xact.h"
-#include "catalog/catquery.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_depend.h"
@@ -58,9 +57,9 @@ static bool match_prosrc_to_literal(const char *prosrc, const char *literal,
 /* ----------------------------------------------------------------
  *		ProcedureCreate
  *
- * Note: allParameterTypes, parameterModes, parameterNames are either arrays
- * of the proper types or NULL.  We declare them Datum, not "ArrayType *",
- * to avoid importing array.h into pg_proc.h.
+ * Note: allParameterTypes, parameterModes, parameterNames, and proconfig
+ * are either arrays of the proper types or NULL.  We declare them Datum,
+ * not "ArrayType *", to avoid importing array.h into pg_proc.h.
  * ----------------------------------------------------------------
  */
 Oid
@@ -84,6 +83,7 @@ ProcedureCreate(const char *procedureName,
 				Datum parameterModes,
 				Datum parameterNames,
 				List *parameterDefaults,
+				Datum proconfig,
 				float4 procost,
 				float4 prorows,
 				char prodataaccess,
@@ -98,6 +98,7 @@ ProcedureCreate(const char *procedureName,
 	bool		internalInParam = false;
 	bool		internalOutParam = false;
 	Oid			variadicType = InvalidOid;
+	Oid			proowner = GetUserId();
 	Relation	rel;
 	HeapTuple	tup;
 	HeapTuple	oldtup;
@@ -106,12 +107,11 @@ ProcedureCreate(const char *procedureName,
 	bool		replaces[Natts_pg_proc];
 	Oid			relid;
 	NameData	procname;
+	TupleDesc	tupDesc;
 	bool		is_update;
 	ObjectAddress myself,
 				referenced;
 	int			i;
-	cqContext	cqc;
-	cqContext  *pcqCtx;
 	bool		isnull;
 	Datum		ndefDatum;
 	int			ndefCount;
@@ -155,9 +155,9 @@ ProcedureCreate(const char *procedureName,
 	}
 
 	/*
-	 * Do not allow return type ANYARRAY or ANYELEMENT unless at least one
-	 * input argument is ANYARRAY or ANYELEMENT.  Also, do not allow return
-	 * type INTERNAL unless at least one input argument is INTERNAL.
+	 * Do not allow polymorphic return type unless at least one input argument
+	 * is polymorphic.	Also, do not allow return type INTERNAL unless at
+	 * least one input argument is INTERNAL.
 	 */
 	for (i = 0; i < parameterCount; i++)
 	{
@@ -165,6 +165,8 @@ ProcedureCreate(const char *procedureName,
 		{
 			case ANYARRAYOID:
 			case ANYELEMENTOID:
+			case ANYNONARRAYOID:
+			case ANYENUMOID:
 				genericInParam = true;
 				break;
 			case INTERNALOID:
@@ -187,6 +189,8 @@ ProcedureCreate(const char *procedureName,
 			{
 				case ANYARRAYOID:
 				case ANYELEMENTOID:
+				case ANYNONARRAYOID:
+				case ANYENUMOID:
 					genericOutParam = true;
 					break;
 				case INTERNALOID:
@@ -196,16 +200,12 @@ ProcedureCreate(const char *procedureName,
 		}
 	}
 
-	/* Normally, we don't allow ANY* return type without an ANY* input type.
-	 * But during upgrade, we're creating "special" function used by aggregate
-	 * and we'll bypass this check for those functions.
-	 */
-	if ((returnType == ANYARRAYOID || returnType == ANYELEMENTOID ||
-		 genericOutParam) && !genericInParam)
+	if ((IsPolymorphicType(returnType) || genericOutParam)
+		&& !genericInParam)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
 				 errmsg("cannot determine result data type"),
-				 errdetail("A function returning \"anyarray\" or \"anyelement\" must have at least one argument of either type.")));
+				 errdetail("A function returning a polymorphic type must have at least one polymorphic argument.")));
 
 	if ((returnType == INTERNALOID || internalOutParam) && !internalInParam)
 		ereport(ERROR,
@@ -301,7 +301,7 @@ ProcedureCreate(const char *procedureName,
 	namestrcpy(&procname, procedureName);
 	values[Anum_pg_proc_proname - 1] = NameGetDatum(&procname);
 	values[Anum_pg_proc_pronamespace - 1] = ObjectIdGetDatum(procNamespace);
-	values[Anum_pg_proc_proowner - 1] = ObjectIdGetDatum(GetUserId());
+	values[Anum_pg_proc_proowner - 1] = ObjectIdGetDatum(proowner);
 	values[Anum_pg_proc_prolang - 1] = ObjectIdGetDatum(languageObjectId);
 	values[Anum_pg_proc_procost - 1] = Float4GetDatum(procost);
 	values[Anum_pg_proc_prorows - 1] = Float4GetDatum(prorows);
@@ -332,6 +332,10 @@ ProcedureCreate(const char *procedureName,
 		values[Anum_pg_proc_probin - 1] = CStringGetTextDatum(probin);
 	else
 		nulls[Anum_pg_proc_probin - 1] = true;
+	if (proconfig != PointerGetDatum(NULL))
+		values[Anum_pg_proc_proconfig - 1] = proconfig;
+	else
+		nulls[Anum_pg_proc_proconfig - 1] = 'n';
 	/* start out with empty permissions */
 	nulls[Anum_pg_proc_proacl - 1] = true;
 	values[Anum_pg_proc_prodataaccess - 1] = CharGetDatum(prodataaccess);
@@ -343,21 +347,14 @@ ProcedureCreate(const char *procedureName,
 		nulls[Anum_pg_proc_proargdefaults - 1] = true;
 
 	rel = heap_open(ProcedureRelationId, RowExclusiveLock);
+	tupDesc = RelationGetDescr(rel);
 
 	/* Check for pre-existing definition */
-
-	pcqCtx = caql_beginscan(
-			caql_addrel(cqclr(&cqc), rel),
-			cql("SELECT * FROM pg_proc "
-				" WHERE proname = :1 "
-				" AND proargtypes = :2 "
-				" AND pronamespace = :3 "
-				" FOR UPDATE ",
-				CStringGetDatum((char *) procedureName),
-				PointerGetDatum(parameterTypes),
-				ObjectIdGetDatum(procNamespace)));
-
-	oldtup = caql_getnext(pcqCtx);
+	oldtup = SearchSysCache(PROCNAMEARGSNSP,
+							PointerGetDatum(procedureName),
+							PointerGetDatum(parameterTypes),
+							ObjectIdGetDatum(procNamespace),
+							0);
 
 	if (HeapTupleIsValid(oldtup))
 	{
@@ -370,7 +367,7 @@ ProcedureCreate(const char *procedureName,
 					(errcode(ERRCODE_DUPLICATE_FUNCTION),
 			errmsg("function \"%s\" already exists with same argument types",
 				   procedureName)));
-		if (!pg_proc_ownercheck(oldOid, GetUserId()))
+		if (!pg_proc_ownercheck(oldOid, proowner))
 			aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC,
 						   procedureName);
 
@@ -467,20 +464,32 @@ ProcedureCreate(const char *procedureName,
 		 */
 		if (OidIsValid(describeFuncOid))
 		{
+			Relation	depRel;
+			ScanKeyData key[3];
+			SysScanDesc scan;
 			HeapTuple   depTup;
-			cqContext  *pcqCtx2;
-			
 
-			/* XXX XXX: SELECT COUNT(*) ... AND classid = :3, RewriteRelationId) */
-			pcqCtx2 = caql_beginscan(
-					NULL,
-					cql("SELECT * FROM pg_depend "
-						" WHERE refclassid = :1 "
-						" AND refobjid = :2 ",
-						ObjectIdGetDatum(ProcedureRelationId),
-						ObjectIdGetDatum(oldOid)));
-			
-			while (HeapTupleIsValid(depTup = caql_getnext(pcqCtx2)))
+			depRel = heap_open(DependRelationId, AccessShareLock);
+
+			/*
+			 * This is equivalent to:
+			 *
+			 * SELECT * FROM pg_depend
+			 * WHERE refclassid = :1 AND refobjid = :2 AND classid = :3
+			 */
+			ScanKeyInit(&key[0],
+						Anum_pg_depend_refclassid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(ProcedureRelationId));
+			ScanKeyInit(&key[1],
+						Anum_pg_depend_refobjid,
+						BTEqualStrategyNumber, F_OIDEQ,
+						ObjectIdGetDatum(oldOid));
+
+			scan = systable_beginscan(depRel, DependReferenceIndexId, true,
+									  SnapshotNow, 2, key);
+
+			while (HeapTupleIsValid(depTup = systable_getnext(scan)))
 			{
 				Form_pg_depend depData = (Form_pg_depend) GETSTRUCT(depTup);
 				if (depData->classid == RewriteRelationId)
@@ -490,7 +499,9 @@ ProcedureCreate(const char *procedureName,
 							 errmsg("cannot add DESCRIBE callback to function used in view(s)")));
 				}
 			}
-			caql_endscan(pcqCtx2);
+			systable_endscan(scan);
+
+			heap_close(depRel, AccessShareLock);
 		}
 
 		/* Can't change aggregate or window status, either */
@@ -521,47 +532,47 @@ ProcedureCreate(const char *procedureName,
 								procedureName)));
 		}
 
-		/* do not change existing ownership or permissions, either */
+		/*
+		 * Do not change existing ownership or permissions, either.  Note
+		 * dependency-update code below has to agree with this decision.
+		 */
 		replaces[Anum_pg_proc_proowner - 1] = false;
 		replaces[Anum_pg_proc_proacl - 1] = false;
 
 		/* Okay, do it... */
-		tup = caql_modify_current(pcqCtx, values, nulls, replaces);
-		caql_update_current(pcqCtx, tup); /* implicit update of index as well*/
+		tup = heap_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
+		simple_heap_update(rel, &tup->t_self, tup);
 
-		caql_endscan(pcqCtx);
+		ReleaseSysCache(oldtup);
 		is_update = true;
 	}
 	else
 	{
-		pcqCtx = caql_beginscan(
-				caql_addrel(cqclr(&cqc), rel),
-				cql("INSERT INTO pg_proc ",
-					NULL));
-
 		/* Creating a new procedure */
-		tup = caql_form_tuple(pcqCtx, values, nulls);
+		tup = heap_form_tuple(tupDesc, values, nulls);
 				
 		if (OidIsValid(funcOid))
 			HeapTupleSetOid(tup, funcOid);
 		
 		/* Insert tuple into the relation */
-		caql_insert(pcqCtx, tup);  /* implicit update of index as well */
-
-		caql_endscan(pcqCtx);
+		simple_heap_insert(rel, tup);
 		is_update = false;
 	}
+
+	/* Need to update indexes for either the insert or update case */
+	CatalogUpdateIndexes(rel, tup);
 
 	retval = HeapTupleGetOid(tup);
 
 	/*
 	 * Create dependencies for the new function.  If we are updating an
 	 * existing function, first delete any existing pg_depend entries.
+	 * (However, since we are not changing ownership or permissions, the
+	 * shared dependencies do *not* need to change, and we leave them alone.)
 	 */
 	if (is_update)
 	{
 		deleteDependencyRecordsFor(ProcedureRelationId, retval);
-		deleteSharedDependencyRecordsFor(ProcedureRelationId, retval);
 		deleteProcCallbacks(retval);
 	}
 
@@ -612,7 +623,8 @@ ProcedureCreate(const char *procedureName,
 							   NIL, DEPENDENCY_NORMAL);
 
 	/* dependency on owner */
-	recordDependencyOnOwner(ProcedureRelationId, retval, GetUserId());
+	if (!is_update)
+		recordDependencyOnOwner(ProcedureRelationId, retval, proowner);
 
 	heap_freetuple(tup);
 
@@ -621,9 +633,29 @@ ProcedureCreate(const char *procedureName,
 	/* Verify function body */
 	if (OidIsValid(languageValidator))
 	{
+		ArrayType  *set_items;
+		int			save_nestlevel;
+
 		/* Advance command counter so new tuple can be seen by validator */
 		CommandCounterIncrement();
+
+		/* Set per-function configuration parameters */
+		set_items = (ArrayType *) DatumGetPointer(proconfig);
+		if (set_items)		/* Need a new GUC nesting level */
+		{
+			save_nestlevel = NewGUCNestLevel();
+			ProcessGUCArray(set_items,
+							(superuser() ? PGC_SUSET : PGC_USERSET),
+							PGC_S_SESSION,
+							GUC_ACTION_SAVE);
+		}
+		else
+			save_nestlevel = 0;		/* keep compiler quiet */
+
 		OidFunctionCall1(languageValidator, ObjectIdGetDatum(retval));
+
+		if (set_items)
+			AtEOXact_GUC(true, save_nestlevel);
 	}
 
 	return retval;
@@ -641,9 +673,11 @@ Datum
 fmgr_internal_validator(PG_FUNCTION_ARGS)
 {
 	Oid			funcoid = PG_GETARG_OID(0);
+	HeapTuple	tuple;
+	Form_pg_proc proc;
 	bool		isnull;
+	Datum		tmp;
 	char	   *prosrc;
-	int			fetchCount;
 
 	if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid))
 		PG_RETURN_VOID();
@@ -653,25 +687,25 @@ fmgr_internal_validator(PG_FUNCTION_ARGS)
 	 * name will be found later if it isn't there now.
 	 */
 
-	prosrc = caql_getcstring_plus(
-					NULL,
-					&fetchCount,
-					&isnull,
-					cql("SELECT prosrc FROM pg_proc "
-						" WHERE oid = :1 ",
-						ObjectIdGetDatum(funcoid)));
-
-	if (!fetchCount)
+	tuple = SearchSysCache(PROCOID,
+						   ObjectIdGetDatum(funcoid),
+						   0, 0, 0);
+	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for function %u", funcoid);
+	proc = (Form_pg_proc) GETSTRUCT(tuple);
 
+	tmp = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosrc, &isnull);
 	if (isnull)
 		elog(ERROR, "null prosrc");
+	prosrc = DatumGetCString(DirectFunctionCall1(textout, tmp));
 
 	if (fmgr_internal_function(prosrc) == InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_FUNCTION),
 				 errmsg("there is no built-in function named \"%s\"",
 						prosrc)));
+
+	ReleaseSysCache(tuple);
 
 	PG_RETURN_VOID();
 }
@@ -691,11 +725,11 @@ fmgr_c_validator(PG_FUNCTION_ARGS)
 	Oid			funcoid = PG_GETARG_OID(0);
 	void	   *libraryhandle;
 	HeapTuple	tuple;
+	Form_pg_proc proc;
 	bool		isnull;
 	Datum		tmp;
 	char	   *prosrc;
 	char	   *probin;
-	cqContext  *pcqCtx;
 
 	if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid))
 		PG_RETURN_VOID();
@@ -706,31 +740,27 @@ fmgr_c_validator(PG_FUNCTION_ARGS)
 	 * and for pg_dump loading it's much better if we *do* check.
 	 */
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_proc "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(funcoid)));
-
-	tuple = caql_getnext(pcqCtx);
-
+	tuple = SearchSysCache(PROCOID,
+						   ObjectIdGetDatum(funcoid),
+						   0, 0, 0);
 	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for function %u", funcoid);
+	proc = (Form_pg_proc) GETSTRUCT(tuple);
 
-	tmp = caql_getattr(pcqCtx, Anum_pg_proc_prosrc, &isnull);
+	tmp = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosrc, &isnull);
 	if (isnull)
-		elog(ERROR, "null prosrc for C function %u", funcoid);
+		elog(ERROR, "null prosrc");
 	prosrc = DatumGetCString(DirectFunctionCall1(textout, tmp));
 
-	tmp = caql_getattr(pcqCtx, Anum_pg_proc_probin, &isnull);
+	tmp = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_probin, &isnull);
 	if (isnull)
-		elog(ERROR, "null probin for C function %u", funcoid);
+		elog(ERROR, "null probin");
 	probin = DatumGetCString(DirectFunctionCall1(textout, tmp));
 
 	(void) load_external_function(probin, prosrc, true, &libraryhandle);
 	(void) fetch_finfo_record(libraryhandle, prosrc);
 
-	caql_endscan(pcqCtx);
+	ReleaseSysCache(tuple);
 
 	PG_RETURN_VOID();
 }
@@ -754,44 +784,36 @@ fmgr_sql_validator(PG_FUNCTION_ARGS)
 	ErrorContextCallback sqlerrcontext;
 	bool		haspolyarg;
 	int			i;
-	cqContext  *pcqCtx;
 
 	if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid))
 		PG_RETURN_VOID();
 
-	pcqCtx = caql_beginscan(
-			NULL,
-			cql("SELECT * FROM pg_proc "
-				" WHERE oid = :1 ",
-				ObjectIdGetDatum(funcoid)));
-
-	tuple = caql_getnext(pcqCtx);
-
+	tuple = SearchSysCache(PROCOID,
+						   ObjectIdGetDatum(funcoid),
+						   0, 0, 0);
 	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for function %u", funcoid);
 	proc = (Form_pg_proc) GETSTRUCT(tuple);
 
 	/* Disallow pseudotype result */
-	/* except for RECORD, VOID, ANYARRAY, or ANYELEMENT */
-	if (get_typtype(proc->prorettype) == 'p' &&
+	/* except for RECORD, VOID, or polymorphic */
+	if (get_typtype(proc->prorettype) == TYPTYPE_PSEUDO &&
 		proc->prorettype != RECORDOID &&
 		proc->prorettype != VOIDOID &&
-		proc->prorettype != ANYARRAYOID &&
-		proc->prorettype != ANYELEMENTOID)
+		!IsPolymorphicType(proc->prorettype))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
 				 errmsg("SQL functions cannot return type %s",
 						format_type_be(proc->prorettype))));
 
 	/* Disallow pseudotypes in arguments */
-	/* except for ANYARRAY or ANYELEMENT */
+	/* except for polymorphic */
 	haspolyarg = false;
 	for (i = 0; i < proc->pronargs; i++)
 	{
-		if (get_typtype(proc->proargtypes.values[i]) == 'p')
+		if (get_typtype(proc->proargtypes.values[i]) == TYPTYPE_PSEUDO)
 		{
-			if (proc->proargtypes.values[i] == ANYARRAYOID ||
-				proc->proargtypes.values[i] == ANYELEMENTOID)
+			if (IsPolymorphicType(proc->proargtypes.values[i]))
 				haspolyarg = true;
 			else
 				ereport(ERROR,
@@ -804,7 +826,7 @@ fmgr_sql_validator(PG_FUNCTION_ARGS)
 	/* Postpone body checks if !check_function_bodies */
 	if (check_function_bodies)
 	{
-		tmp = caql_getattr(pcqCtx, Anum_pg_proc_prosrc, &isnull);
+		tmp = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosrc, &isnull);
 		if (isnull)
 			elog(ERROR, "null prosrc");
 
@@ -841,7 +863,7 @@ fmgr_sql_validator(PG_FUNCTION_ARGS)
 		error_context_stack = sqlerrcontext.previous;
 	}
 
-	caql_endscan(pcqCtx);
+	ReleaseSysCache(tuple);
 
 	PG_RETURN_VOID();
 }

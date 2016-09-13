@@ -22,7 +22,7 @@
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * $PostgreSQL: pgsql/src/include/catalog/pg_description.h,v 1.25 2007/01/05 22:19:52 momjian Exp $
+ * $PostgreSQL: pgsql/src/include/catalog/pg_description.h,v 1.26 2008/01/01 19:45:56 momjian Exp $
  *
  * NOTES
  *		the genbki.sh script reads this file and generates .bki
@@ -38,24 +38,6 @@
 
 #include "catalog/genbki.h"
 
-/* TIDYCAT_BEGINFAKEDEF
-
-   CREATE TABLE pg_description
-   with (oid=false, relid=2609, toast_oid=2834, toast_index=2835, content=MASTER_ONLY)
-   (
-   objoid       oid, 
-   classoid     oid, 
-   objsubid     integer, 
-   description  text
-   );
-
-   create unique index on pg_description(objoid, classoid, objsubid) with (indexid=2675, CamelCase=DescriptionObj);
-
-   alter table pg_description add fk classoid on pg_class(oid);
-
-   TIDYCAT_ENDFAKEDEF
-*/
-
 /* ----------------
  *		pg_description definition.	cpp turns this into
  *		typedef struct FormData_pg_description
@@ -70,6 +52,9 @@ CATALOG(pg_description,2609) BKI_WITHOUT_OIDS
 	int4		objsubid;		/* column number, or 0 if not used */
 	text		description;	/* description of object */
 } FormData_pg_description;
+
+/* GPDB added foreign key definitions for gpcheckcat. */
+FOREIGN_KEY(classoid REFERENCES pg_class(oid));
 
 /* ----------------
  *		Form_pg_description corresponds to a pointer to a tuple with

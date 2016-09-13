@@ -600,11 +600,27 @@ void ChangeTracking_GetRelationChangeInfoFromXlog(
 		 * The following changes must be logged in the change log.
 		 */
 		case RM_HEAP2_ID:
-			switch (info)
+			op = info & XLOG_HEAP_OPMASK;
+			switch (op)
 			{
 				case XLOG_HEAP2_FREEZE:
 				{
 					xl_heap_freeze *xlrec = (xl_heap_freeze *) data;
+
+					ChangeTracking_AddRelationChangeInfo(
+													   relationChangeInfoArray,
+													   relationChangeInfoArrayCount,
+													   relationChangeInfoMaxSize,
+													   &(xlrec->heapnode.node),
+													   xlrec->block,
+													   &xlrec->heapnode.persistentTid,
+													   xlrec->heapnode.persistentSerialNum);
+					break;
+				}
+				case XLOG_HEAP2_CLEAN:
+				case XLOG_HEAP2_CLEAN_MOVE:
+				{
+					xl_heap_clean *xlrec = (xl_heap_clean *) data;
 
 					ChangeTracking_AddRelationChangeInfo(
 													   relationChangeInfoArray,
@@ -652,6 +668,7 @@ void ChangeTracking_GetRelationChangeInfoFromXlog(
 													   xlrec->target.persistentSerialNum);
 					break;
 				}
+				case XLOG_HEAP_HOT_UPDATE:
 				case XLOG_HEAP_UPDATE:
 				case XLOG_HEAP_MOVE:
 				{
@@ -680,20 +697,6 @@ void ChangeTracking_GetRelationChangeInfoFromXlog(
 														   &xlrec->target.persistentTid,
 														   xlrec->target.persistentSerialNum);
 						
-					break;
-				}
-				case XLOG_HEAP_CLEAN:
-				{
-					xl_heap_clean *xlrec = (xl_heap_clean *) data;
-
-					ChangeTracking_AddRelationChangeInfo(
-													   relationChangeInfoArray,
-													   relationChangeInfoArrayCount,
-													   relationChangeInfoMaxSize,
-													   &(xlrec->heapnode.node),
-													   xlrec->block,
-													   &xlrec->heapnode.persistentTid,
-													   xlrec->heapnode.persistentSerialNum);
 					break;
 				}
 				case XLOG_HEAP_NEWPAGE:
@@ -1345,7 +1348,6 @@ ChangeTracking_GetIncrementalChangeList(void)
 		/* must be in a transaction in order to use SPI */
 		StartTransactionCommand();
 		ActiveSnapshot = CopySnapshot(GetTransactionSnapshot());
-		FtsFindSuperuser(true);
 
 		if (SPI_OK_CONNECT != SPI_connect())
 		{
@@ -1631,7 +1633,6 @@ ChangeTrackingResult* ChangeTracking_GetChanges(ChangeTrackingRequest *request)
 		/* must be in a transaction in order to use SPI */
 		StartTransactionCommand();
 		ActiveSnapshot = CopySnapshot(GetTransactionSnapshot());
-		FtsFindSuperuser(true);
 
 		if (SPI_OK_CONNECT != SPI_connect())
 		{
@@ -1926,12 +1927,14 @@ static void ChangeTracking_RenameLogFile(CTFType source, CTFType dest)
 
 static void ChangeTracking_DropLogFile(CTFType ftype)
 {
-	File	file;
+	char	path[MAXPGPATH];
 
 	Assert(ftype != CTF_META);
-	
-	file = ChangeTracking_OpenFile(ftype);
-	FileUnlink(file);
+
+	ChangeTracking_SetPathByType(ftype, path);
+
+	if (unlink(path))
+		elog(LOG, "could not unlink file \"%s\": %m", path);
 }
 
 static void ChangeTracking_DropLogFiles(void)
@@ -1948,19 +1951,20 @@ static void ChangeTracking_DropLogFiles(void)
 
 static void ChangeTracking_DropMetaFile(void)
 {
-	File	file;
+	char	path[MAXPGPATH];
 
-	file = ChangeTracking_OpenFile(CTF_META);
-	
 	changeTrackingResyncMeta->resync_mode_full = false;
 	setFullResync(changeTrackingResyncMeta->resync_mode_full);
 	changeTrackingResyncMeta->resync_lsn_end.xlogid = 0;
 	changeTrackingResyncMeta->resync_lsn_end.xrecoff = 0;
 	changeTrackingResyncMeta->resync_transition_completed = false;
 	changeTrackingResyncMeta->insync_transition_completed = false;
-	
-	/* delete the change tracking meta file*/
-	FileUnlink(file);	
+
+	/* Delete the change tracking meta file */
+	ChangeTracking_SetPathByType(CTF_META, path);
+
+	if (unlink(path))
+		elog(WARNING, "could not unlink file \"%s\": %m", path);
 }
 
 /*
@@ -2599,101 +2603,6 @@ int64 ChangeTracking_GetTotalSpaceUsedOnDisk(void)
     return db_dir_size(CHANGETRACKINGDIR);
 }
 
-/*
- * Get the total number of (unique) blocks that had changed and
- * need to be resynchronized. 
- * 
- * returns number of blocks or -1 for error.
- */
-int64 ChangeTracking_GetTotalBlocksToSync(void)
-{	
-	StringInfoData 	sqlstmt;
-	int 			ret;
-	volatile bool 	connected = false;
-	int64			count = 0;
-	ResourceOwner 	save = CurrentResourceOwner;
-	MemoryContext 	oldcontext = CurrentMemoryContext;
-	CTFType			ftype = CTF_LOG_COMPACT;
-	
-	Assert(gp_change_tracking);
-
-	/* first find out if log file exists, if not return -1 */
-	if(!ChangeTracking_DoesFileExist(ftype))
-		return -1;
-	
-	
-	/* assemble our query string */
-	initStringInfo(&sqlstmt);
-	appendStringInfo(&sqlstmt, "SELECT COUNT(*) "
-							   "FROM (SELECT COUNT(*) "
-							   "      FROM gp_changetracking_log(%d) "
-							   "      GROUP BY (space, db, rel, blocknum) ) "
-							   "      AS foo", ftype);
-	
-	PG_TRY();
-	{
-
-		/* must be in a transaction in order to use SPI */
-		StartTransactionCommand();
-		ActiveSnapshot = CopySnapshot(GetTransactionSnapshot());
-		FtsFindSuperuser(true);
-
-		if (SPI_OK_CONNECT != SPI_connect())
-		{
-			ereport(ERROR, (errcode(ERRCODE_CDB_INTERNAL_ERROR),
-							errmsg("Unable to obtain change tracking information from segment database."),
-							errdetail("SPI_connect failed in ChangeTracking_GetTotalBlocksToSync()")));
-		}
-		connected = true;
-
-		/* Do the query. */
-		ret = SPI_execute(sqlstmt.data, true, 0);
-		Assert(SPI_processed == 1);
-
-		if (ret > 0 && SPI_tuptable != NULL)
-		{
-			TupleDesc 		tupdesc = SPI_tuptable->tupdesc;
-			SPITupleTable*	tuptable = SPI_tuptable;
-			MemoryContext 	cxt_save;
-			HeapTuple 		tuple = tuptable->vals[0];
-			char*			str_count = SPI_getvalue(tuple, tupdesc, 1);
-				
-			/* use our own context so that SPI won't free our stuff later */
-			cxt_save = MemoryContextSwitchTo(oldcontext);
-
-			count = DatumGetInt64(DirectFunctionCall1(int8in, CStringGetDatum(str_count)));
-				
-			MemoryContextSwitchTo(cxt_save);			
-		}
-
-		connected = false;
-		SPI_finish();
-		
-		CommitTransactionCommand();
-	}
-
-	/* Clean up in case of error. */
-	PG_CATCH();
-	{
-		if (connected)
-			SPI_finish();
-
-		AbortCurrentTransaction();
-		
-		/* Carry on with error handling. */
-		PG_RE_THROW();
-	}
-	PG_END_TRY();
-
-	MemoryContextSwitchTo(oldcontext);
-	CurrentResourceOwner = save;
-
-	pfree(sqlstmt.data);
-
-	return count;
-
-}
-
 /*************************************
  * Compacting related routines.
  *************************************/
@@ -3173,7 +3082,6 @@ int ChangeTracking_CompactLogFile(CTFType source, CTFType dest, XLogRecPtr*	upto
 		/* must be in a transaction in order to use SPI */
 		StartTransactionCommand();
 		ActiveSnapshot = CopySnapshot(GetTransactionSnapshot());
-		FtsFindSuperuser(true);
 
 		if (SPI_OK_CONNECT != SPI_connect())
 		{
@@ -3234,15 +3142,8 @@ int ChangeTracking_CompactLogFile(CTFType source, CTFType dest, XLogRecPtr*	upto
 				persistentTid = DatumGetPointer(DirectFunctionCall1(tidin, CStringGetDatum(str_tid)));
 				persistentSerialNum = DatumGetInt64(DirectFunctionCall1(int8in, CStringGetDatum(str_sn)));
 
-				
-				#ifdef FAULT_INJECTOR	
-						FaultInjector_InjectFaultIfSet(
-									  FileRepChangeTrackingCompacting, 
-									   DDLNotSpecified,
-									   "",	// databaseName
-									   ""); // tableName
-				#endif
-	
+				SIMPLE_FAULT_INJECTOR(FileRepChangeTrackingCompacting);
+
 				/* write this record to the compact file */
 				ChangeTracking_AddBufferPoolChange(dest,
 												   endlsn, 

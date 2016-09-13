@@ -25,7 +25,7 @@ all : devel
 .PHONY : check installcheck installcheck-parallel
 
 # Targets for running regression tests
-.PHONY : installcheck-good installcheck-olaptest installcheck-bugbuster
+.PHONY : installcheck-good installcheck-optfunctional installcheck-olaptest installcheck-bugbuster
 
 # The pvk target builds a subset of the GPDB package that includes just the
 # tools used to verify the configuration of a set of GPDB servers.
@@ -925,7 +925,6 @@ PVK_SCRIPTS = \
 	bin/generate_load_tpch.pl	\
 	bin/gpscp			\
 	bin/gpssh			\
-	bin/gpcheckos			\
 	bin/gpcheckperf			\
 	bin/run_operator_tests.pl	\
 	$(NULL)
@@ -960,9 +959,8 @@ SET_VERSION_SCRIPTS = \
 	bin/gpactivatestandby \
 	bin/gpaddmirrors \
 	bin/gpbitmapreindex \
-	bin/gpcheckos \
 	bin/gpcheckperf \
-	bin/gpcrondump.py \
+	bin/gpcrondump \
 	bin/gpdbrestore \
 	bin/gpdeletesystem \
 	bin/gpexpand \
@@ -974,12 +972,9 @@ SET_VERSION_SCRIPTS = \
 	bin/gpmigrator \
 	bin/gpmigrator_mirror \
 	bin/gpmovemirrors \
-	bin/gprebuildsystem \
 	bin/gprecoverseg \
 	bin/gpreload \
 	bin/gpscp \
-	bin/gpsizecalc \
-	bin/gpskew \
 	bin/gpssh \
 	bin/gpssh-exkeys \
 	bin/gpstart \
@@ -989,7 +984,6 @@ SET_VERSION_SCRIPTS = \
 	bin/lib/gpcheckcat \
 	sbin/gpaddconfig.py \
 	sbin/gpchangeuserpassword \
-	sbin/gpcheck_hostdump \
 	sbin/gpcleansegmentdir.py \
 	sbin/gpfixuserlimts \
 	sbin/gpgetstatususingtransition.py \
@@ -998,7 +992,6 @@ SET_VERSION_SCRIPTS = \
 	sbin/gpsegstop.py \
 	sbin/gpsegtoprimaryormirror.py \
 	sbin/gpsetdbid.py \
-	sbin/gpsuspend.py \
 	sbin/gpupgrademirror.py \
 	lib/python/gppylib/programs/clsAddMirrors.py \
 	lib/python/gppylib/programs/clsHostCacheLookup.py \
@@ -1007,7 +1000,6 @@ SET_VERSION_SCRIPTS = \
 	lib/python/gppylib/programs/clsSystemState.py \
 	lib/python/gppylib/programs/gppkg.py \
 	lib/python/gppylib/programs/kill.py \
-	lib/python/gppylib/programs/verify.py \
 	lib/python/gppylib/mainUtils.py \
 	$(NULL)
 
@@ -1135,8 +1127,6 @@ endif
 	rm -rf $(INSTLOC)/bin/lib/.p4ignore
 	rm -rf $(INSTLOC)/bin/src
 	rm -f $(INSTLOC)/bin/gpchecksubnetcfg
-	echo "`date` -- INFO: Removing $(INSTLOC)/bin/gpexpandsystem"
-	rm -f $(INSTLOC)/bin/gpexpandsystem
 	rm -rf $(INSTLOC)/bin/gppylib
 	find $(INSTLOC)/lib/python/gppylib -name test -type d | xargs rm -rf
 
@@ -1152,13 +1142,7 @@ endif
 
 libcopy=(cd $(1) && $(TAR) cf - $(2)) | (cd $(3) && $(TAR) xvf -)$(check_pipe_for_errors)
 
-.PHONY: copy-rsa-libs copy-nbu-libs
-
-copy-rsa-libs:
-	# Copy rsa lockbox libs - supported only on rhel (required for Data
-ifeq "$(BLD_ARCH)" "rhel5_x86_64"
-	cp -fpr $(BLD_THIRDPARTY_LIB_DIR)/rsa_csp $(INSTLOC)/lib/;
-endif
+.PHONY: copy-nbu-libs
 
 copy-nbu-libs:
 	#Copy NetBackup libs
@@ -1171,7 +1155,7 @@ ifeq "$(BLD_ARCH)" "rhel5_x86_64"
 	cp -fpr $(BLD_THIRDPARTY_LIB_DIR)/../Netbackup/nbu75 $(INSTLOC)/lib/;
 endif
 
-copylibs : thirdparty-dist copy-rsa-libs copy-nbu-libs
+copylibs : thirdparty-dist copy-nbu-libs
 	if [ `uname -s` = 'SunOS' ]; then cp `ldd $(INSTLOC)/bin/psql | grep gcc | head -1 | awk '{print $$3}'` $(INSTLOC)/lib; fi
 	if [ `uname -s` = 'Darwin' ] ; then \
 	    for lib in `otool -L $(INSTLOC)/bin/psql | egrep 'libssl|libcrypto|libcom_err|libkrb5|curl|readline|numa' | awk '{print $$1}'`; do \
@@ -1279,10 +1263,6 @@ ifeq "$(ORCA_CONFIG)" "--enable-orca"
 	cp $(LIBGPOS_LIBDIR)/libgpos.$(LDSFX) $(INSTLOC)/lib;
 	rm -f $(INSTLOC)/lib/libxerces-c-3.1.$(LDSFX);
 	cp $(XERCES_LIBDIR)/libxerces-c-3.1.$(LDSFX) $(INSTLOC)/lib;
-
-	# Copy DXL translators library
-	echo "Copy DXL translators library";	
-	cp $(BLD_TOP)/../src/backend/gpopt/libdxltranslators.$(LDSFX) $(INSTLOC)/lib;
 
 	cd $(LIBSTDC++_LIBDIR); tar cvf - * | (cd $(INSTLOC)/lib; tar xfp -)
 
