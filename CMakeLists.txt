@@ -3,6 +3,13 @@ project(gpdb)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
+file(GLOB SOURCE_FILES
+        "*.h"
+        "*.c"
+        "*.cpp"
+        "*.cxx"
+        )
+
 set(SOURCE_FILES
     src/backend/access/aocs/test/aocsam_test.c
     src/backend/access/aocs/aocs_compaction.c
@@ -35,7 +42,10 @@ set(SOURCE_FILES
     src/backend/access/common/reloptions.c
     src/backend/access/common/scankey.c
     src/backend/access/common/tupdesc.c
+<<<<<<< Updated upstream
     src/backend/access/external/test/url_test.c
+=======
+>>>>>>> Stashed changes
     src/backend/access/external/fileam.c
     src/backend/access/external/url.c
     src/backend/access/gin/ginarrayproc.c
@@ -175,7 +185,10 @@ set(SOURCE_FILES
     src/backend/cdb/cdbbufferedappend.c
     src/backend/cdb/cdbbufferedread.c
     src/backend/cdb/cdbcat.c
+<<<<<<< Updated upstream
     src/backend/cdb/cdbcellbuf.c
+=======
+>>>>>>> Stashed changes
     src/backend/cdb/cdbcopy.c
     src/backend/cdb/cdbdatabaseinfo.c
     src/backend/cdb/cdbdirectopen.c
@@ -341,7 +354,10 @@ set(SOURCE_FILES
     src/backend/commands/view.c
     src/backend/executor/test/execAmi_test.c
     src/backend/executor/test/execHHashagg_test.c
+<<<<<<< Updated upstream
     src/backend/executor/test/execWorkfile_test.c
+=======
+>>>>>>> Stashed changes
     src/backend/executor/test/nodeShareInputScan_test.c
     src/backend/executor/test/nodeSubplan_test.c
     src/backend/executor/execAmi.c
@@ -608,7 +624,10 @@ set(SOURCE_FILES
     src/backend/postmaster/autovacuum.c
     src/backend/postmaster/backoff.c
     src/backend/postmaster/bgwriter.c
+<<<<<<< Updated upstream
     src/backend/postmaster/checkpoint.c
+=======
+>>>>>>> Stashed changes
     src/backend/postmaster/fork_process.c
     src/backend/postmaster/perfmon.c
     src/backend/postmaster/perfmon_segmentinfo.c
@@ -686,7 +705,10 @@ set(SOURCE_FILES
     src/backend/storage/buffer/bufmgr.c
     src/backend/storage/buffer/freelist.c
     src/backend/storage/buffer/localbuf.c
+<<<<<<< Updated upstream
     src/backend/storage/file/test/bfz_test.c
+=======
+>>>>>>> Stashed changes
     src/backend/storage/file/test/compress_zlib_test.c
     src/backend/storage/file/bfz.c
     src/backend/storage/file/buffile.c
@@ -898,7 +920,10 @@ set(SOURCE_FILES
     src/backend/utils/misc/bitmap_compression.c
     src/backend/utils/misc/bitstream.c
     src/backend/utils/misc/faultinjector.c
+<<<<<<< Updated upstream
     src/backend/utils/misc/gp_atomic.c
+=======
+>>>>>>> Stashed changes
     src/backend/utils/misc/guc-file.c
     src/backend/utils/misc/guc.c
     src/backend/utils/misc/guc_gp.c
@@ -908,7 +933,10 @@ set(SOURCE_FILES
     src/backend/utils/misc/ps_status.c
     src/backend/utils/misc/simex.c
     src/backend/utils/misc/simexsys.c
+<<<<<<< Updated upstream
     src/backend/utils/misc/size.c
+=======
+>>>>>>> Stashed changes
     src/backend/utils/misc/superuser.c
     src/backend/utils/misc/syncbitvector.c
     src/backend/utils/misc/testutils.c
@@ -948,12 +976,15 @@ set(SOURCE_FILES
     src/backend/utils/sort/tuplesort_mkqsort.c
     src/backend/utils/sort/tuplestore.c
     src/backend/utils/sort/tuplestorenew.c
+<<<<<<< Updated upstream
     src/backend/utils/stat/bayes.c
     src/backend/utils/stat/pinv.c
     src/backend/utils/stat/pinv.h
     src/backend/utils/stat/regress.c
     src/backend/utils/stat/student.c
     src/backend/utils/stat/student.h
+=======
+>>>>>>> Stashed changes
     src/backend/utils/test/session_state_test.c
     src/backend/utils/time/combocid.c
     src/backend/utils/time/sharedsnapshot.c
@@ -1007,12 +1038,18 @@ set(SOURCE_FILES
     src/bin/pg_dump/cdb/cdb_ddboost_util.c
     src/bin/pg_dump/cdb/cdb_dump.c
     src/bin/pg_dump/cdb/cdb_dump.h
+<<<<<<< Updated upstream
     src/bin/pg_dump/cdb/cdb_dump_agent.c
+=======
+>>>>>>> Stashed changes
     src/bin/pg_dump/cdb/cdb_dump_include.c
     src/bin/pg_dump/cdb/cdb_dump_include.h
     src/bin/pg_dump/cdb/cdb_dump_util.c
     src/bin/pg_dump/cdb/cdb_dump_util.h
+<<<<<<< Updated upstream
     src/bin/pg_dump/cdb/cdb_dumpall_agent.c
+=======
+>>>>>>> Stashed changes
     src/bin/pg_dump/cdb/cdb_lockbox.c
     src/bin/pg_dump/cdb/cdb_lockbox.h
     src/bin/pg_dump/cdb/cdb_restore.c
@@ -1245,7 +1282,10 @@ set(SOURCE_FILES
     src/include/cdb/cdbbufferedappend.h
     src/include/cdb/cdbbufferedread.h
     src/include/cdb/cdbcat.h
+<<<<<<< Updated upstream
     src/include/cdb/cdbcellbuf.h
+=======
+>>>>>>> Stashed changes
     src/include/cdb/cdbconn.h
     src/include/cdb/cdbcopy.h
     src/include/cdb/cdbdatabaseinfo.h
@@ -1304,7 +1344,10 @@ set(SOURCE_FILES
     src/include/cdb/cdbpersistentstore.h
     src/include/cdb/cdbpersistenttablespace.h
     src/include/cdb/cdbplan.h
+<<<<<<< Updated upstream
     src/include/cdb/cdbptrbuf.h
+=======
+>>>>>>> Stashed changes
     src/include/cdb/cdbpublic.h
     src/include/cdb/cdbpullup.h
     src/include/cdb/cdbrelsize.h
@@ -1730,7 +1773,10 @@ set(SOURCE_FILES
     src/include/utils/formatting.h
     src/include/utils/geo_decls.h
     src/include/utils/gp_alloc.h
+<<<<<<< Updated upstream
     src/include/utils/gp_atomic.h
+=======
+>>>>>>> Stashed changes
     src/include/utils/guc.h
     src/include/utils/guc_tables.h
     src/include/utils/help_config.h
@@ -1766,7 +1812,10 @@ set(SOURCE_FILES
     src/include/utils/sharedcache.h
     src/include/utils/sharedsnapshot.h
     src/include/utils/simex.h
+<<<<<<< Updated upstream
     src/include/utils/size.h
+=======
+>>>>>>> Stashed changes
     src/include/utils/string_wrapper.h
     src/include/utils/syncbitvector.h
     src/include/utils/syncrefhashtable.h
@@ -1908,7 +1957,10 @@ set(SOURCE_FILES
     src/interfaces/ecpg/test/expected/thread-thread_implicit.c
     src/interfaces/ecpg/test/pg_regress_ecpg.c
     src/interfaces/ecpg/test/regression.h
+<<<<<<< Updated upstream
     src/interfaces/gppc/test/gppc_test.c
+=======
+>>>>>>> Stashed changes
     src/interfaces/gppc/gppc.c
     src/interfaces/libpq/fe-auth.c
     src/interfaces/libpq/fe-auth.h
@@ -2023,10 +2075,13 @@ set(SOURCE_FILES
     src/test/thread/thread_test.c
     src/test/tinc/ext/simplejson/_speedups.c
     src/test/tinc/tincrepo/mpp/gpdb/tests/catalog/schema_topology/sqls/ddls/enhanced_tables/data/tabfunc_demo.c
+<<<<<<< Updated upstream
     src/test/tinc/tincrepo/mpp/gpdb/tests/package/etablefunc_gppc/data/tabfunc_gppc_demo.c
     src/test/tinc/tincrepo/mpp/gpdb/tests/package/gppc/data/gppc_test.c
     src/test/tinc/tincrepo/mpp/gpdb/tests/package/mapreduce/c_functions/functions.c
     src/test/tinc/tincrepo/mpp/gpdb/tests/package/mapreduce/mpp11061/gpmrdemo.c
+=======
+>>>>>>> Stashed changes
     src/test/tinc/tincrepo/mpp/gpdb/tests/storage/vacuum/scenario/lockrelease/lockrelease.c
     src/test/tinc/tincrepo/mpp/gpdb/tests/storage/vacuum/xidlimits/xidhelper.c
     src/test/tinc/tincrepo/mpp/gpdb/tests/storage/walrepl/oom/lib/oom_malloc.c
@@ -2056,4 +2111,8 @@ set(SOURCE_FILES
 
 include_directories(src/include)
 
+<<<<<<< Updated upstream
 add_executable(gpdb ${SOURCE_FILES})
+=======
+add_executable(gpdb ${SOURCE_FILES})
+>>>>>>> Stashed changes
