@@ -1320,8 +1320,6 @@ fi
 ## Header files
 ##
 
-AC_INCLUDES_DEFAULT
-
 # Check for Greenplum Query Optimizer (orca) and supporting Greenplum OS header files.
 if test "$enable_orca" = yes; then
   PGAC_CHECK_ORCA_HEADERS
