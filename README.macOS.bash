@@ -49,6 +49,8 @@ sudo sysctl -w net.inet.tcp.sendspace=262144
 sudo sysctl -w net.inet.tcp.recvspace=262144
 sudo sysctl -w kern.ipc.maxsockbuf=8388608
 
+sudo sysctl -w kern.stack_depth_max=12288
+
 sudo tee -a /etc/sysctl.conf << EOF
 kern.sysv.shmmax=2147483648
 kern.sysv.shmmin=1
@@ -64,6 +66,8 @@ kern.maxfilesperproc=131072
 net.inet.tcp.sendspace=262144
 net.inet.tcp.recvspace=262144
 kern.ipc.maxsockbuf=8388608
+
+kern.stack_depth_max=12288
 EOF
 
 # Step: Create GPDB destination directory
