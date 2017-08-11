@@ -9308,23 +9308,32 @@ CreateCheckPoint(int flags)
 static void
 GetXLogCleanUpTo(XLogRecPtr recptr, uint32 *_logId, uint32 *_logSeg)
 {
-	/*
-	 * See if we have a live WAL sender and see if it has a
-	 * start xlog location (with active basebackup) or standby fsync location
-	 * (with active standby). We have to compare it with prev. checkpoint
-	 * location. We use the min out of them to figure out till
-	 * what point we need to save the xlog seg files
-	 */
-	XLogRecPtr xlogCleanUpTo = WalSndCtlGetXLogCleanUpTo();
-	if (!XLogRecPtrIsInvalid(xlogCleanUpTo))
-	{
-		if (XLByteLT(recptr, xlogCleanUpTo))
-			xlogCleanUpTo = recptr;
-	}
-	else
-		xlogCleanUpTo = recptr;
+#ifndef USE_SEGWALREP
+    /* Only for MASTER check this GUC and act */
+    if (GpIdentity.segindex == MASTER_CONTENT_ID)
+    {
+#endif
+        /*
+         * See if we have a live WAL sender and see if it has a
+         * start xlog location (with active basebackup) or standby fsync location
+         * (with active standby). We have to compare it with prev. checkpoint
+         * location. We use the min out of them to figure out till
+         * what point we need to save the xlog seg files
+         * Currently, applicable to Master only
+         */
+        XLogRecPtr xlogCleanUpTo = WalSndCtlGetXLogCleanUpTo();
+        if (!XLogRecPtrIsInvalid(xlogCleanUpTo))
+        {
+            if (XLByteLT(recptr, xlogCleanUpTo))
+                xlogCleanUpTo = recptr;
+        }
+        else
+            xlogCleanUpTo = recptr;
 
-	CheckKeepWalSegments(xlogCleanUpTo, _logId, _logSeg);
+        CheckKeepWalSegments(xlogCleanUpTo, _logId, _logSeg);
+#ifndef USE_SEGWALREP
+    }
+#endif
 }
 
 /*
