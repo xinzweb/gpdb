@@ -1936,7 +1936,7 @@ struct config_bool ConfigureNamesBool_gp[] =
 			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE | GUC_GPDB_ADDOPT
 		},
 		&gp_disable_tuple_hints,
-		true, NULL, NULL
+		false, NULL, NULL
 	},
 	{
 		{"debug_print_server_processes", PGC_SUSET, LOGGING_WHAT,
