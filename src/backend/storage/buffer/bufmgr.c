@@ -2537,9 +2537,12 @@ MarkBufferDirtyHint(Buffer buffer, Relation relation)
 	 * is only intended to be used in cases where failing to write out the data
 	 * would be harmless anyway, it doesn't really matter.
 	 */
-	if ((bufHdr->flags & (BM_DIRTY | BM_JUST_DIRTIED)) !=
+	if (!IsInitProcessingMode() &&
+		(bufHdr->flags & (BM_DIRTY | BM_JUST_DIRTIED)) !=
 		(BM_DIRTY | BM_JUST_DIRTIED))
 	{
+		Assert(MyProc);
+
 		XLogRecPtr	lsn = InvalidXLogRecPtr;
 		bool		dirtied = false;
 		bool	saved_inCommit = MyProc->inCommit;
