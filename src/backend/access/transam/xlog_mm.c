@@ -1569,8 +1569,10 @@ mmxlog_add_database(
  * which it cannot do since they're not guaranteed to be in a consistent state.
  *
  * NOTE: You must hold the PersistentObjLock before calling this routine!
+ *
+ * @return true if mmxlog appends additional information, false otherwise.
  */
-void
+bool
 mmxlog_append_checkpoint_data(XLogRecData rdata[6])
 {
 	fspc_agg_state *f;
@@ -1599,7 +1601,7 @@ mmxlog_append_checkpoint_data(XLogRecData rdata[6])
 
 			SUPPRESS_ERRCONTEXT_POP();
 		}
-		return;
+		return false;
 	}
 
 	if (IsStandbyMode())
@@ -1651,6 +1653,8 @@ mmxlog_append_checkpoint_data(XLogRecData rdata[6])
 
 		SUPPRESS_ERRCONTEXT_POP();
 	}
+
+	return true;
 }
 
 /*
@@ -1661,6 +1665,17 @@ mmxlog_get_checkpoint_record_fields(char *recordStart,
 	MasterMirrorCheckpointInfo *mmckpt)
 {
 	Assert(recordStart != NULL);
+
+	if (gp_before_filespace_setup)
+	{
+		mmckpt->fspc = NULL;
+		mmckpt->fspcMapLen = 0;
+		mmckpt->tspc = NULL;
+		mmckpt->tspcMapLen = 0;
+		mmckpt->dbdir = NULL;
+		mmckpt->dbdirMapLen = 0;
+		return 0;
+	}
 
 	mmckpt->fspc = (fspc_agg_state *)recordStart;
 	mmckpt->fspcMapLen = FSPC_CHECKPOINT_BYTES(mmckpt->fspc->count);

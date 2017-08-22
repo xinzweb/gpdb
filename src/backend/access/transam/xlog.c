@@ -8419,6 +8419,7 @@ UnpackCheckPointRecord(
 
 	/* Finally, point to prepared transaction information */
 	ckptExtended->ptas = (prepared_transaction_agg_state *)current_record_ptr;
+	Assert(remainderLen == PREPARED_TRANSACTION_CHECKPOINT_BYTES(ckptExtended->ptas->count));
 
 	if (Debug_persistent_recovery_print)
 	{
@@ -9087,7 +9088,15 @@ CreateCheckPoint(int flags)
 	 * as this is a NOOP if we're not the master.
 	 */
 	READ_PERSISTENT_STATE_ORDERED_LOCK;
-	mmxlog_append_checkpoint_data(rdata);
+	if(mmxlog_append_checkpoint_data(rdata))
+	{
+		rdata[4].next = &(rdata[5]);
+	}
+	else
+	{
+		Assert(NULL == rdata[4].next);
+		rdata[1].next = &(rdata[5]);
+	}
 
 	prepared_transaction_agg_state *p = NULL;
 
@@ -9096,7 +9105,6 @@ CreateCheckPoint(int flags)
 	rdata[5].data = (char*)p;
 	rdata[5].buffer = InvalidBuffer;
 	rdata[5].len = PREPARED_TRANSACTION_CHECKPOINT_BYTES(p->count);
-	rdata[4].next = &(rdata[5]);
 	rdata[5].next = NULL;
 
 	if (Debug_persistent_recovery_print)
