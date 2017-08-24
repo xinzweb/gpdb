@@ -85,7 +85,7 @@ static volatile sig_atomic_t got_SIGHUP = false;
 
 static char *probeDatabase = "postgres";
 
-static char failover_strategy='n';
+static char failover_strategy=GpFaultStrategyMirrorLess;
 
 /* struct holding segment configuration */
 static CdbComponentDatabases *cdb_component_dbs = NULL;
@@ -482,6 +482,9 @@ void FtsLoop()
 		readCdbComponentInfoAndUpdateStatus(probeContext);
 		getFailoverStrategy(&failover_strategy);
 
+		if (failover_strategy == GpFaultStrategyMirrorLess)
+			goto prober_sleep;
+
 		elog(DEBUG3, "FTS: starting %s scan with %d segments and %d contents",
 			 (processing_fullscan ? "full " : ""),
 			 cdb_component_dbs->total_segment_dbs,
@@ -574,11 +577,10 @@ probePublishUpdate(uint8 *probe_results)
 	bool update_found = false;
 	int i;
 
-	if (failover_strategy == 'f')
-	{
-		/* preprocess probe results to decide what is the current segment state */
-		FtsPreprocessProbeResultsFilerep(cdb_component_dbs, probe_results);
-	}
+	Assert(failover_strategy == GpFaultStrategyFileRepMirrorred);
+
+	/* preprocess probe results to decide what is the current segment state */
+	FtsPreprocessProbeResultsFilerep(cdb_component_dbs, probe_results);
 
 	for (i = 0; i < cdb_component_dbs->total_segment_dbs; i++)
 	{
@@ -599,27 +601,6 @@ probePublishUpdate(uint8 *probe_results)
 		CdbComponentDatabaseInfo *primary = segInfo;
 		CdbComponentDatabaseInfo *mirror = FtsGetPeerSegment(segInfo->segindex, segInfo->dbid);
 
-		if (failover_strategy == 'n')
-		{
-			Assert(SEGMENT_IS_ACTIVE_PRIMARY(segInfo));
-			Assert(FTS_STATUS_ISALIVE(segInfo->dbid, ftsProbeInfo->fts_status));
-			Assert(mirror == NULL);
-
-			/* no mirror available to failover */
-			if (!PROBE_IS_ALIVE(segInfo))
-			{
-				FtsSegmentStatusChange changes;
-				uint8 statusOld = ftsProbeInfo->fts_status[segInfo->dbid];
-				uint8 statusNew = statusOld & ~FTS_STATUS_ALIVE;
-
-				buildSegmentStateChange(segInfo, &changes, statusNew);
-
-				FtsFailoverNull(&changes);
-			}
-			continue;
-		}
-
-		Assert(failover_strategy == 'f');
 		Assert(mirror != NULL);
 
 		/* changes required for primary and mirror */
@@ -831,6 +812,8 @@ probeUpdateConfig(FtsSegmentStatusChange *changes, int changeCount)
 	int i;
 	char desc[SQL_CMD_BUF_SIZE];
 
+	Assert(failover_strategy == GpFaultStrategyFileRepMirrorred);
+
 	/*
 	 * Commit/abort transaction below will destroy
 	 * CurrentResourceOwner.  We need it for catalog reads.
@@ -854,7 +837,6 @@ probeUpdateConfig(FtsSegmentStatusChange *changes, int changeCount)
 
 		if (changelogging)
 		{
-			Assert(failover_strategy == 'f');
 			Assert(primary && valid);
 		}
 
@@ -977,21 +959,13 @@ getFailoverStrategy(char *strategy)
 bool
 FtsIsSegmentAlive(CdbComponentDatabaseInfo *segInfo)
 {
-	switch (failover_strategy)
-	{
-		case 'f':
-			if (SEGMENT_IS_ACTIVE_MIRROR(segInfo) && SEGMENT_IS_ALIVE(segInfo))
-				return true;
-			/* fallthrough */
-		case 'n':
-		case 's':
-			if (SEGMENT_IS_ACTIVE_PRIMARY(segInfo))
-				return true;
-			break;
-		default:
-			write_log("segmentToProbe: invalid failover strategy (%c).", failover_strategy);
-			break;
-	}
+	Assert(failover_strategy == GpFaultStrategyFileRepMirrorred);
+
+	if (SEGMENT_IS_ACTIVE_MIRROR(segInfo) && SEGMENT_IS_ALIVE(segInfo))
+		return true;
+
+	if (SEGMENT_IS_ACTIVE_PRIMARY(segInfo))
+		return true;
 
 	return false;
 }
