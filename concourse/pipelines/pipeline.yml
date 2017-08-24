@@ -673,6 +673,7 @@ jobs:
       IVYREPO_REALM: {{ivyrepo_realm}}
       IVYREPO_USER: {{ivyrepo_user}}
       IVYREPO_PASSWD: {{ivyrepo_passwd}}
+      CONFIGURE_FLAGS: {{configure_flags}}
       TARGET_OS: centos
       TARGET_OS_VERSION: 6
   - aggregate:
