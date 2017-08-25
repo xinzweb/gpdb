@@ -483,7 +483,14 @@ void FtsLoop()
 		getFailoverStrategy(&failover_strategy);
 
 		if (failover_strategy == GpFaultStrategyMirrorLess)
+		{
+			if (processing_fullscan)
+			{
+				ftsProbeInfo->fts_statusVersion = ftsProbeInfo->fts_statusVersion + 1;
+				rescan_requested = false;
+			}
 			goto prober_sleep;
+		}
 
 		elog(DEBUG3, "FTS: starting %s scan with %d segments and %d contents",
 			 (processing_fullscan ? "full " : ""),
@@ -1000,16 +1007,6 @@ FtsDumpChanges(FtsSegmentStatusChange *changes, int changeEntries)
 			 (new_pri ? 'p' : 'm'));
 	}
 }
-
-static void
-FtsFailoverNull(FtsSegmentStatusChange *changePrimary)
-{
-	if (gp_log_fts >= GPVARS_VERBOSITY_VERBOSE)
-	{
-		FtsDumpChanges(changePrimary, 1);
-	}
-}
-
 
 /**
  * Marks the given db as in-sync in the segment configuration.
