@@ -130,9 +130,6 @@ static void updateConfiguration(FtsSegmentStatusChange *changes, int changeEntri
 static bool probeUpdateConfig(FtsSegmentStatusChange *changes, int changeCount);
 
 static void getFailoverStrategy(char *strategy);
-static void FtsFailoverNull(FtsSegmentStatusChange *changes);
-
-
 
 /*
  * Main entry point for ftsprobe process.
@@ -484,6 +481,7 @@ void FtsLoop()
 
 		if (failover_strategy == GpFaultStrategyMirrorLess)
 		{
+			/* The dispatcher could have requested a scan so just ignore it and unblock the dispatcher */
 			if (processing_fullscan)
 			{
 				ftsProbeInfo->fts_statusVersion = ftsProbeInfo->fts_statusVersion + 1;
