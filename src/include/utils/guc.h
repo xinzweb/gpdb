@@ -662,10 +662,12 @@ extern void pg_timezone_abbrev_initialize(void);
 
 extern char *gp_guc_list_show(GucSource excluding, List *guclist);
 
-extern bool gp_select_config_files(const char *configdir, const char *progname);
-
 extern struct config_generic *find_option(const char *name,
 				bool create_placeholders, int elevel);
+
+extern bool gp_select_config_files(const char *configdir, const char *progname);
+
+extern void gp_set_synchronous_standby_name(bool synchronous_replication);
 
 #ifdef EXEC_BACKEND
 extern void write_nondefault_variables(GucContext context);
