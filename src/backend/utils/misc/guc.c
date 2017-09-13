@@ -3613,7 +3613,7 @@ SelectConfigFiles(const char *userDoption, const char *progname)
 	free(fname);
 
 	/* Perform similar processes for Greenplum-specific configuration files. */
-	if (!gp_select_config_files(configdir, progname))
+	if (!select_gp_replication_config_files(configdir, progname))
 		return false;
 
 	/*
@@ -4461,7 +4461,7 @@ parse_int(const char *value, int *result, int flags, const char **hintmsg)
  * If the string parses okay, return true, else false.
  * If okay and result is not NULL, return the value in *result.
  */
-static bool
+bool
 parse_real(const char *value, double *result)
 {
 	double		val;

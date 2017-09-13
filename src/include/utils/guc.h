@@ -665,9 +665,10 @@ extern char *gp_guc_list_show(GucSource excluding, List *guclist);
 extern struct config_generic *find_option(const char *name,
 				bool create_placeholders, int elevel);
 
-extern bool gp_select_config_files(const char *configdir, const char *progname);
+extern bool select_gp_replication_config_files(const char *configdir, const char *progname);
 
-extern void gp_set_synchronous_standby_name(bool synchronous_replication);
+extern void set_gp_replication_config(const char *name, const char *value);
+extern bool parse_real(const char *value, double *result);
 
 #ifdef EXEC_BACKEND
 extern void write_nondefault_variables(GucContext context);

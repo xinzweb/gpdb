@@ -34,10 +34,12 @@
 #include "optimizer/cost.h"
 #include "optimizer/planmain.h"
 #include "pgstat.h"
+#include "parser/scansup.h"
 #include "postmaster/syslogger.h"
 #include "replication/walsender.h"
 #include "storage/bfz.h"
 #include "storage/proc.h"
+#include "utils/builtins.h"
 #include "utils/guc_tables.h"
 #include "utils/inval.h"
 #include "utils/resscheduler.h"
@@ -129,6 +131,9 @@ extern struct config_generic *find_option(const char *name, bool create_placehol
 static void write_gp_replication_conf_file(int fd, const char *filename, struct name_value_pair *head);
 static void replace_gp_replication_config_value(struct name_value_pair **head_p, struct name_value_pair **tail_p,
                                     const char *name, const char *value);
+
+static bool validate_gp_replication_conf_option(struct config_generic * record,
+                                    const char *value, int elevel);
 
 extern bool enable_partition_rules;
 
@@ -6189,7 +6194,7 @@ assign_gp_default_storage_options(const char *newval,
 }
 
 bool
-gp_select_config_files(const char *configdir, const char *progname)
+select_gp_replication_config_files(const char *configdir, const char *progname)
 {
 	char *fname;
 
@@ -6220,8 +6225,16 @@ gp_select_config_files(const char *configdir, const char *progname)
 	return true;
 }
 
+/*
+ * Set GUC value in GP_REPLICATION_CONFIG_FILENAME.
+ *
+ * If value is NULL, then this GUC is removed from the configuration.
+ *
+ * If name exists, its value will be updated.
+ * otherwise, the new named GUC will be added.
+ */
 void
-gp_set_synchronous_standby_name(bool synchronous_replication)
+set_gp_replication_config(const char *name, const char *value)
 {
 	struct name_value_pair *head = NULL;
 	struct name_value_pair *tail = NULL;
@@ -6274,17 +6287,36 @@ gp_set_synchronous_standby_name(bool synchronous_replication)
 		FreeFile(infile);
 	}
 
-	char value[5];
-	snprintf(value, sizeof(value), "");
-	if (synchronous_replication)
+	/*
+	 * If a value is specified, verify that it's sane.
+	 */
+	if (value)
 	{
+		struct config_generic *record;
+
+		record = find_option(name, false, LOG);
+		if (record == NULL)
+			ereport(ERROR,
+			        (errcode(ERRCODE_UNDEFINED_OBJECT),
+					        errmsg("unrecognized configuration parameter \"%s\"", name)));
+
 		/*
-		 * Now, replace any existing entry with the new value, or add it if
-		 * not present.
+		 * Don't allow the parameters which can't be set in configuration
+		 * files to be set in GP_REPLICATION_CONFIG_FILENAME file.
 		 */
-		snprintf(value, sizeof(value), "*");
+		if ((record->context == PGC_INTERNAL) ||
+		    (record->flags & GUC_DISALLOW_IN_FILE))
+			ereport(ERROR,
+			        (errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
+					        errmsg("parameter \"%s\" cannot be changed",
+					               name)));
+
+		if (!validate_gp_replication_conf_option(record, value, ERROR))
+			ereport(ERROR,
+			        (errmsg("invalid value for parameter \"%s\": \"%s\"", name, value)));
 	}
-	replace_gp_replication_config_value(&head, &tail, "synchronous_standby_names", value);
+
+	replace_gp_replication_config_value(&head, &tail, name, value);
 
 	/*
 	 * To ensure crash safety, first write the new file data to a temp file,
@@ -6320,7 +6352,6 @@ gp_set_synchronous_standby_name(bool synchronous_replication)
 				 * at worst it can lose the parameters set by last ALTER SYSTEM
 				 * command.
 				 */
-				/* FIXME: The upstream used durable_rename. */
 				if (rename(GpReplicationConfigTempFilename, GpReplicationConfigFilename) < 0)
 					ereport(ERROR,
 					        (errcode_for_file_access(),
@@ -6469,3 +6500,114 @@ replace_gp_replication_config_value(struct name_value_pair  **head_p, struct nam
 		(*tail_p)->next = item;
 	*tail_p = item;
 }
+
+/*
+ * Validates configuration parameter and value
+ */
+static bool
+validate_gp_replication_conf_option(struct config_generic * record,
+                     const char *value, int elevel)
+{
+	/*
+	 * Validate the value for the passed record, to ensure it is in expected
+	 * range.
+	 */
+	switch (record->vartype)
+	{
+		case PGC_BOOL:
+		{
+			bool		newval;
+
+			if (!parse_bool(value, &newval))
+			{
+				ereport(elevel,
+				        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						        errmsg("parameter \"%s\" requires a Boolean value",
+						               record->name)));
+				return false;
+			}
+		}
+			break;
+		case PGC_INT:
+		{
+			struct config_int *conf = (struct config_int *) record;
+			int			newval;
+			const char *hintmsg;
+
+			if (!parse_int(value, &newval, conf->gen.flags, &hintmsg))
+			{
+				ereport(elevel,
+				        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						        errmsg("invalid value for parameter \"%s\": \"%s\"",
+						               record->name, value),
+						        hintmsg ? errhint("%s", hintmsg) : 0));
+				return false;
+			}
+			if (newval < conf->min || newval > conf->max)
+			{
+				ereport(elevel,
+				        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						        errmsg("%d is outside the valid range for parameter \"%s\" (%d .. %d)",
+						               newval, record->name, conf->min, conf->max)));
+				return false;
+			}
+		}
+			break;
+		case PGC_REAL:
+		{
+			struct config_real *conf = (struct config_real *) record;
+			double		newval;
+
+			if (!parse_real(value, &newval))
+			{
+				ereport(elevel,
+				        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						        errmsg("parameter \"%s\" requires a numeric value",
+						               record->name)));
+				return false;
+			}
+			if (newval < conf->min || newval > conf->max)
+			{
+				ereport(elevel,
+				        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						        errmsg("%g is outside the valid range for parameter \"%s\" (%g .. %g)",
+						               newval, record->name, conf->min, conf->max)));
+				return false;
+			}
+		}
+			break;
+		case PGC_STRING:
+		{
+			struct config_string *conf = (struct config_string *) record;
+
+			/*
+			 * The only sort of "parsing" check we need to ensure value is NOT truncated if GUC_IS_NAME.
+			 */
+			if (conf->gen.flags & GUC_IS_NAME)
+			{
+				char *tempPtr;
+				bool is_truncated;
+
+				tempPtr = strdup(value);
+				if (tempPtr == NULL)
+					return false;
+
+				truncate_identifier(tempPtr, strlen(tempPtr), true);
+				is_truncated = (strlen(value) != strlen(tempPtr));
+
+				free(tempPtr);
+
+				if (is_truncated)
+					return false;
+			}
+		}
+			break;
+		default:
+			/*
+			 * make sure all the types are checked, and we should never reach here
+			 */
+			Assert(false);
+	}
+	return true;
+}
+
