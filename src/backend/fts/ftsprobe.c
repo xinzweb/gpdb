@@ -25,6 +25,8 @@
 #include "gp-libpq-int.h"
 #include "cdb/cdbgang.h"		/* gp_pthread_create */
 #include "libpq/ip.h"
+#include "libpq/pqformat.h"
+#include "libpq/libpq.h"
 #include "postmaster/fts.h"
 
 #include "executor/spi.h"
@@ -48,7 +50,7 @@
  */
 
 #ifdef USE_SEGWALREP
-#define PROBE_RESPONSE_LEN  (4)         /* size of segment response message */
+#define PROBE_RESPONSE_LEN  (sizeof(ProbeResponse) + 4)         /* size of segment response message */
 #else
 #define PROBE_RESPONSE_LEN  (20)         /* size of segment response message */
 #endif
@@ -104,7 +106,6 @@ typedef struct ProbeMsg
 	PrimaryMirrorTransitionPacket payload;
 } ProbeMsg;
 
-
 /*
  * STATIC VARIABLES
  */
@@ -137,6 +138,40 @@ static bool probeProcessResponse(ProbeConnectionInfo *probeInfo);
 static bool probeTimeout(ProbeConnectionInfo *probeInfo, const char* calledFrom);
 static void probeClose(ProbeConnectionInfo *probeInfo);
 
+typedef struct ProbeResponse
+{
+	bool IsMirrorUp;
+} ProbeResponse;
+
+static void
+SendProbeResponse(ProbeResponse *response)
+{
+	StringInfoData buf;
+
+	initStringInfo(&buf);
+
+	pq_beginmessage(&buf, '\0');
+
+	pq_sendbytes(&buf, (char *) response, sizeof(ProbeResponse));
+
+	pq_endmessage(&buf);
+	pq_flush();
+}
+
+static bool
+ReceiveProbeResponse(ProbeResponse *response, char *inputBuf)
+{
+	uint32 bufInt;
+
+	memcpy(&bufInt, inputBuf, 4);
+	if (ntohl(bufInt) != PROBE_RESPONSE_LEN)
+	{
+		write_log("FTS: probe protocol violation got length %d.", ntohl(bufInt));
+		return false;
+	}
+
+	memcpy(response, inputBuf, sizeof(ProbeResponse));
+}
 
 /*
  * strerror() is not threadsafe.  Therefore, prober threads must use
@@ -931,6 +966,5 @@ probeSegmentFromThread(void *arg)
 
 	return NULL;
 }
-
 
 /* EOF */
