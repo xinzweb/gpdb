@@ -25,8 +25,6 @@
 #include "gp-libpq-int.h"
 #include "cdb/cdbgang.h"		/* gp_pthread_create */
 #include "libpq/ip.h"
-#include "libpq/pqformat.h"
-#include "libpq/libpq.h"
 #include "postmaster/fts.h"
 
 #include "executor/spi.h"
@@ -120,41 +118,6 @@ static bool probePollIn(ProbeConnectionInfo *probeInfo);
 static bool probeReceive(ProbeConnectionInfo *probeInfo);
 static bool probeProcessResponse(ProbeConnectionInfo *probeInfo);
 static bool probeTimeout(ProbeConnectionInfo *probeInfo, const char* calledFrom);
-
-typedef struct ProbeResponse
-{
-	bool IsMirrorUp;
-} ProbeResponse;
-
-static void
-SendProbeResponse(ProbeResponse *response)
-{
-	StringInfoData buf;
-
-	initStringInfo(&buf);
-
-	pq_beginmessage(&buf, '\0');
-
-	pq_sendbytes(&buf, (char *) response, sizeof(ProbeResponse));
-
-	pq_endmessage(&buf);
-	pq_flush();
-}
-
-static bool
-ReceiveProbeResponse(ProbeResponse *response, char *inputBuf)
-{
-	uint32 bufInt;
-
-	memcpy(&bufInt, inputBuf, 4);
-	if (ntohl(bufInt) != PROBE_RESPONSE_LEN)
-	{
-		write_log("FTS: probe protocol violation got length %d.", ntohl(bufInt));
-		return false;
-	}
-
-	memcpy(response, inputBuf, sizeof(ProbeResponse));
-}
 
 /*
  * strerror() is not threadsafe.  Therefore, prober threads must use
@@ -542,6 +505,20 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 	 * Walrep primary segments return empty response to FTS probes, which means
 	 * a libpq message with length header and no body.
 	 */
+	ProbeResponse response;
+	pqGetnchar((char *)&response, sizeof(ProbeResponse), probeInfo->conn);
+	if (response.IsMirrorUp)
+	{
+		// TODO: learn how the higher level caller collect the information from each thread
+		// TODO: update the catalog to mark the mirror is up.
+		write_log("FTS: segment (content=%d, dbid=%d) reported mirror is UP to the prober.",
+				  probeInfo->segmentId, probeInfo->dbId);
+	}
+	else
+	{
+		write_log("FTS: segment (content=%d, dbid=%d) reported mirror is DOWN to the prober.",
+				  probeInfo->segmentId, probeInfo->dbId);
+	}
 	return true;
 #endif
 	int32 role;

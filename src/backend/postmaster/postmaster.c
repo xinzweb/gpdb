@@ -3573,19 +3573,7 @@ processPrimaryMirrorTransitionRequest(Port *port, void *pkt)
 	}
 }
 
-#ifdef USE_SEGWALREP
-static void
-sendPrimaryMirrorTransitionQuery()
-{
-	StringInfoData buf;
-
-	initStringInfo(&buf);
-
-	pq_beginmessage(&buf, '\0');
-	pq_endmessage(&buf);
-	pq_flush();
-}
-#else
+#ifndef USE_SEGWALREP
 static void
 sendPrimaryMirrorTransitionQuery(uint32 mode, uint32 segstate, uint32 datastate, uint32 faulttype)
 {
@@ -3615,8 +3603,8 @@ static void
 processPrimaryMirrorTransitionQuery(Port *port, void *pkt)
 {
 #ifdef USE_SEGWALREP
-	/* Send FTS probe response */
-	sendPrimaryMirrorTransitionQuery();
+	/* Handle FTS probe and send response */
+	HandleFtsProbe();
 #else
 	PrimaryMirrorTransitionPacket *transition = (PrimaryMirrorTransitionPacket *) pkt;
 	int length;

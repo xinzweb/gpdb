@@ -16,6 +16,7 @@
 #ifndef FTS_H
 #define FTS_H
 
+#include "cdb/cdbutil.h"
 
 /*
  * ENUMS
@@ -90,6 +91,10 @@ typedef struct
 	uint32 stateMirror;
 } FtsSegmentPairState;
 
+typedef struct ProbeResponse
+{
+	bool IsMirrorUp;
+} ProbeResponse;
 
 /*
  * FTS process interface
@@ -114,6 +119,12 @@ extern void FtsDumpChanges(FtsSegmentStatusChange *changes, int changeEntries);
  */
 extern bool FtsIsActive(void);
 
+#ifdef USE_SEGWALREP
+/*
+ * Interface for WALREP specific checking
+ */
+extern void HandleFtsProbe(void);
+#endif
 
 /*
  * Interface for FireRep-specific segment state machine and transitions
