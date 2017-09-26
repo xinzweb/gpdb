@@ -32,7 +32,7 @@ bool IsMirrorUp(void)
 	 */
 	Assert(max_wal_senders == 1);
 
-	LWLockAcquire(SyncRepLock, LW_SHARED);
+	//LWLockAcquire(SyncRepLock, LW_SHARED);
 	for (int i = 0; i < max_wal_senders; i++)
 	{
 		/* use volatile pointer to prevent code rearrangement */
@@ -48,7 +48,7 @@ bool IsMirrorUp(void)
 			}
 		}
 	}
-	LWLockRelease(SyncRepLock);
+	//LWLockRelease(SyncRepLock);
 
 	return IsMirrorUp;
 }

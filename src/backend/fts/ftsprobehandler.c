@@ -27,7 +27,7 @@ SendProbeResponse(ProbeResponse *response)
 
 	pq_beginmessage(&buf, '\0');
 
-	//pq_sendbytes(&buf, (char *) response, sizeof(ProbeResponse));
+	pq_sendbytes(&buf, (char *) response, sizeof(ProbeResponse));
 
 	pq_endmessage(&buf);
 	pq_flush();
