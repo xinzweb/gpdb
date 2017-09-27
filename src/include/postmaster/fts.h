@@ -35,7 +35,7 @@ typedef struct probe_context_per_thread
 
 typedef struct probe_context
 {
-	int count;
+	int16 count;
 	probe_context_per_thread *context;
 }probe_context;
 #endif

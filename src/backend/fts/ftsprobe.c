@@ -645,10 +645,6 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 				  probeInfo->dbId, probeInfo->conn->errorMessage.data);
 		return false;
 	}
-	/* segment responded to probe, mark it as alive */
-	probeInfo->segmentStatus = PROBE_ALIVE;
-	write_log("FTS: segment (content=%d, dbid=%d) reported segmentstatus %x to the prober.",
-			  probeInfo->segmentId, probeInfo->dbId, probeInfo->segmentStatus);
 #ifdef USE_SEGWALREP
 	/*
 	 * Walrep primary segments return empty response to FTS probes, which means
@@ -658,10 +654,14 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 	pqGetnchar((char *)&response, sizeof(ProbeResponse), probeInfo->conn);
 	probeInfo->response->isPrimaryAlive = true;
 	probeInfo->response->isMirrorAlive = response.IsMirrorUp;
-	write_log("FTS: segment (content=%d, dbid=%d) reported IsMirrorUp %d to the prober.",
-			  probeInfo->segmentId, probeInfo->dbId, response.IsMirrorUp);
-	return true;
-#endif
+	write_log("FTS: segment (content=%d, dbid=%d, role=%c) reported IsMirrorUp %d to the prober.",
+			  probeInfo->segmentId, probeInfo->dbId, probeInfo->role, response.IsMirrorUp);
+#else
+	/* segment responded to probe, mark it as alive */
+	probeInfo->segmentStatus = PROBE_ALIVE;
+	write_log("FTS: segment (content=%d, dbid=%d) reported segmentstatus %x to the prober.",
+			  probeInfo->segmentId, probeInfo->dbId, probeInfo->segmentStatus);
+
 	int32 role;
 	int32 state;
 	int32 mode;
@@ -731,6 +731,7 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 		write_log("FTS: segment (content=%d, dbid=%d) reported fault %s segment status %x to the prober.",
 				  probeInfo->segmentId, probeInfo->dbId, getFaultTypeLabel(fault), probeInfo->segmentStatus);
 	}
+#endif
 	return true;
 }
 
