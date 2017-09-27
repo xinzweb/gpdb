@@ -78,6 +78,9 @@ typedef struct ProbeConnectionInfo
 	char role;                           /* primary ('p'), mirror ('m') */
 	char mode;                           /* sync ('s'), resync ('r'), change-tracking ('c') */
 	GpMonotonicTime startTime;           /* probe start timestamp */
+#ifdef USE_SEGWALREP
+	probe_response *response;
+#endif
 	char segmentStatus;                  /* probed segment status */
 	int16 probe_errno;                   /* saved errno from the latest system call */
 	char errmsg[PROBE_ERR_MSG_LEN];      /* message returned by strerror() */
@@ -232,24 +235,8 @@ FtsProbeSegments(CdbComponentDatabases *dbs, uint8 *probeRes)
 	}
 }
 
-/*
- * This is called from several different threads: ONLY USE THREADSAFE FUNCTIONS INSIDE.
- */
-static char
-probeSegment(CdbComponentDatabaseInfo *dbInfo)
+static char probeSegmentHelper(CdbComponentDatabaseInfo *dbInfo, ProbeConnectionInfo probeInfo)
 {
-	Assert(dbInfo != NULL);
-
-	/* setup probe descriptor */
-	ProbeConnectionInfo probeInfo;
-	memset(&probeInfo, 0, sizeof(ProbeConnectionInfo));
-	probeInfo.segmentId = dbInfo->segindex;
-	probeInfo.dbId = dbInfo->dbid;
-	probeInfo.role = dbInfo->role;
-	probeInfo.mode = dbInfo->mode;
-
-	probeInfo.segmentStatus = PROBE_DEAD;
-
 	/*
 	 * probe segment: open socket -> connect -> send probe msg -> receive response;
 	 * on any error the connection is shut down, the socket is closed
@@ -285,7 +272,9 @@ probeSegment(CdbComponentDatabaseInfo *dbInfo)
 	if (!FtsIsActive())
 	{
 		/* the returned value will be ignored */
+#ifndef USE_SEGWALREP
 		probeInfo.segmentStatus = PROBE_ALIVE;
+#endif
 	}
 
 	if (retryCnt == gp_fts_probe_retries)
@@ -299,9 +288,169 @@ probeSegment(CdbComponentDatabaseInfo *dbInfo)
 
 	if (probeInfo.conn)
 		PQfinish(probeInfo.conn);
+
+#ifndef USE_SEGWALREP
 	return probeInfo.segmentStatus;
+#endif
 }
 
+/*
+ * This is called from several different threads: ONLY USE THREADSAFE FUNCTIONS INSIDE.
+ */
+
+static char probeSegment(CdbComponentDatabaseInfo *dbInfo)
+{
+	Assert(dbInfo != NULL);
+
+	/* setup probe descriptor */
+	ProbeConnectionInfo probeInfo;
+	memset(&probeInfo, 0, sizeof(ProbeConnectionInfo));
+	probeInfo.segmentId = dbInfo->segindex;
+	probeInfo.dbId = dbInfo->dbid;
+	probeInfo.role = dbInfo->role;
+	probeInfo.mode = dbInfo->mode;
+
+	probeInfo.segmentStatus = PROBE_DEAD;
+
+	return probeSegmentHelper(dbInfo, probeInfo);
+}
+
+static void
+probeWalRepSegment(probe_context_per_thread *context)
+{
+	Assert(context);
+	probe_response *response = context->response;
+
+	Assert(response);
+	Assert(context->segment_db_info);
+
+	if(!FtsIsSegmentAlive(context->segment_db_info))
+	{
+		response->isPrimaryAlive = false;
+		response->isMirrorAlive = false;
+
+		return;
+	}
+
+	CdbComponentDatabaseInfo *segment_db_info = context->segment_db_info;
+	Assert(segment_db_info != NULL);
+
+	/* setup probe descriptor */
+	ProbeConnectionInfo probeInfo;
+	memset(&probeInfo, 0, sizeof(ProbeConnectionInfo));
+	probeInfo.segmentId = segment_db_info->segindex;
+	probeInfo.dbId = segment_db_info->dbid;
+	probeInfo.role = segment_db_info->role;
+	probeInfo.mode = segment_db_info->mode;
+	probeInfo.response = response;
+
+	probeSegmentHelper(segment_db_info, probeInfo);
+}
+
+static void *
+probeWalRepSegmentFromThread(void *arg)
+{
+	probe_context *contexts = (probe_context *)arg;
+
+	Assert(contexts);
+
+	int number_of_probed_segments = 0;
+
+	while(number_of_probed_segments < contexts->count)
+	{
+		/*
+		 * Look for the unprocessed context
+		 */
+		int context_index = number_of_probed_segments;
+
+		pthread_mutex_lock(&worker_thread_mutex);
+		while(context_index < contexts->count)
+		{
+			if (!contexts->context[context_index].isScheduled)
+			{
+				contexts->context[context_index].isScheduled = true;
+				break;
+			}
+			number_of_probed_segments++;
+			context_index++;
+		}
+		pthread_mutex_unlock(&worker_thread_mutex);
+
+		/*
+		 * If probed all the segments, we are done.
+		 */
+		if (context_index == contexts->count)
+			break;
+
+		/*
+		 * If FTS is shutdown, abort.
+		 */
+		if (!FtsIsActive())
+			break;
+
+		/* now, let's probe the primary */
+		probe_context_per_thread *context = contexts->context + context_index;
+		probeWalRepSegment(context);
+	}
+
+	return NULL;
+}
+
+void
+FtsWalRepProbeSegments(CdbComponentDatabases *dbs, probe_response *responses)
+{
+	int workers = gp_fts_probe_threadcount;
+	pthread_t *threads = NULL;
+	probe_context contexts;
+
+	Assert(responses);
+
+	contexts.count = dbs->total_segment_dbs;
+	contexts.context = (probe_context_per_thread *)palloc(contexts.count * sizeof(probe_context_per_thread));
+
+	for(int i = 0; i < contexts.count; i++)
+	{
+		probe_context_per_thread *context = &(contexts.context[i]);
+		CdbComponentDatabaseInfo *segment = &(dbs->segment_db_info[i]);
+
+		Assert(responses[i].dbid == segment->dbid);
+
+		context->segment_db_info = segment;
+		context->response = &(responses[i]);
+		context->response->isPrimaryAlive = false;
+		context->response->isMirrorAlive = false;
+		context->isScheduled = false;
+	}
+
+	threads = (pthread_t *)palloc(workers * sizeof(pthread_t));
+
+	for(int i = 0; i < workers; i++)
+	{
+		int ret = gp_pthread_create(&threads[i], probeWalRepSegmentFromThread, &contexts, "FtsWalRepProbeSegments");
+
+		if (ret)
+		{
+			pfree(threads);
+			pfree(contexts.context);
+			ereport(ERROR, (errmsg("FTS: failed to create probing thread")));
+		}
+	}
+
+	for(int i = 0; i < workers; i++)
+	{
+		int ret = pthread_join(threads[i], NULL);
+
+		if (ret)
+		{
+			pfree(threads);
+			pfree(contexts.context);
+			ereport(ERROR, (errmsg("FTS: failed to join probing thread")));
+		}
+	}
+
+	pfree(threads);
+	pfree(contexts.context);
+}
 
 /*
  * Establish async libpq connection to a segment
@@ -513,11 +662,15 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 		// TODO: update the catalog to mark the mirror is up.
 		write_log("FTS: segment (content=%d, dbid=%d) reported mirror is UP to the prober.",
 				  probeInfo->segmentId, probeInfo->dbId);
+		probeInfo->response->isPrimaryAlive = true;
+		probeInfo->response->isMirrorAlive = true;
 	}
 	else
 	{
 		write_log("FTS: segment (content=%d, dbid=%d) reported mirror is DOWN to the prober.",
 				  probeInfo->segmentId, probeInfo->dbId);
+		probeInfo->response->isPrimaryAlive = true;
+		probeInfo->response->isMirrorAlive = false;
 	}
 	return true;
 #endif

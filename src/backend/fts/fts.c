@@ -79,8 +79,10 @@
  * STATIC VARIABLES
  */
 
+#ifndef USE_SEGWALREP
 /* one byte of status for each segment */
 static uint8 scan_status[MAX_NUM_OF_SEGMENTS];
+#endif
 
 static bool am_ftsprobe = false;
 
@@ -502,6 +504,16 @@ void FtsLoop()
 		 */
 		oldContext = MemoryContextSwitchTo(probeContext);
 
+#ifdef USE_SEGWALREP
+		probe_response *responses = (probe_response *)palloc(cdb_component_dbs->total_segment_dbs * sizeof(probe_response));
+		for(int response_index = 0; response_index < cdb_component_dbs->total_segment_dbs; response_index++)
+		{
+			probe_response *response  = responses + response_index;
+			response->dbid = cdb_component_dbs->segment_db_info[response_index].dbid;
+		}
+		FtsWalRepProbeSegments(cdb_component_dbs, responses);
+		updated_bitmap = true;
+#else
 		/* probe segments */
 		FtsProbeSegments(cdb_component_dbs, scan_status);
 
@@ -510,7 +522,7 @@ void FtsLoop()
 		 * change anything, we return true.
 		 */
 		updated_bitmap = probePublishUpdate(scan_status);
-
+#endif
 
 		MemoryContextSwitchTo(oldContext);
 
