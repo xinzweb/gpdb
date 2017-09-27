@@ -48,7 +48,7 @@
  */
 
 #ifdef USE_SEGWALREP
-#define PROBE_RESPONSE_LEN  (sizeof(ProbeResponse) + 4)         /* size of segment response message */
+#define PROBE_RESPONSE_LEN  (sizeof(ProbeResponse) + sizeof(PacketLen))         /* size of segment response message */
 #else
 #define PROBE_RESPONSE_LEN  (20)         /* size of segment response message */
 #endif
@@ -637,7 +637,7 @@ static bool
 probeProcessResponse(ProbeConnectionInfo *probeInfo)
 {
 	int32 responseLen;
-	pqGetInt(&responseLen, 4, probeInfo->conn);
+	pqGetInt(&responseLen, sizeof(PacketLen), probeInfo->conn);
 	if (responseLen != PROBE_RESPONSE_LEN)
 	{
 		write_log("FTS: invalid response length %d from segment "
@@ -656,22 +656,10 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 	 */
 	ProbeResponse response;
 	pqGetnchar((char *)&response, sizeof(ProbeResponse), probeInfo->conn);
-	if (response.IsMirrorUp)
-	{
-		// TODO: learn how the higher level caller collect the information from each thread
-		// TODO: update the catalog to mark the mirror is up.
-		write_log("FTS: segment (content=%d, dbid=%d) reported mirror is UP to the prober.",
-				  probeInfo->segmentId, probeInfo->dbId);
-		probeInfo->response->isPrimaryAlive = true;
-		probeInfo->response->isMirrorAlive = true;
-	}
-	else
-	{
-		write_log("FTS: segment (content=%d, dbid=%d) reported mirror is DOWN to the prober.",
-				  probeInfo->segmentId, probeInfo->dbId);
-		probeInfo->response->isPrimaryAlive = true;
-		probeInfo->response->isMirrorAlive = false;
-	}
+	probeInfo->response->isPrimaryAlive = true;
+	probeInfo->response->isMirrorAlive = response.IsMirrorUp;
+	write_log("FTS: segment (content=%d, dbid=%d) reported IsMirrorUp %d to the prober.",
+			  probeInfo->segmentId, probeInfo->dbId, response.IsMirrorUp);
 	return true;
 #endif
 	int32 role;
