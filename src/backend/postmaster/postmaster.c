@@ -3604,7 +3604,7 @@ processPrimaryMirrorTransitionQuery(Port *port, void *pkt)
 {
 #ifdef USE_SEGWALREP
 	/* Handle FTS probe and send response */
-	HandleFtsProbe();
+	HandleFtsWalRepProbe();
 #else
 	PrimaryMirrorTransitionPacket *transition = (PrimaryMirrorTransitionPacket *) pkt;
 	int length;

@@ -315,6 +315,7 @@ static char probeSegment(CdbComponentDatabaseInfo *dbInfo)
 	return probeSegmentHelper(dbInfo, probeInfo);
 }
 
+#ifdef USE_SEGWALREP
 static void
 probeWalRepSegment(probe_response_per_segment *response)
 {
@@ -421,6 +422,7 @@ FtsWalRepProbeSegments(probe_context *context)
 		}
 	}
 }
+#endif
 
 /*
  * Establish async libpq connection to a segment

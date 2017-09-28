@@ -422,6 +422,7 @@ readCdbComponentInfoAndUpdateStatus(MemoryContext probeContext)
 	}
 }
 
+#ifdef USE_SEGWALREP
 static bool
 probeWalRepUpdateConfig(int16 dbid, int16 segindex, bool IsSegmentAlive)
 {
@@ -608,6 +609,7 @@ FtsWalRepInitProbeContext(CdbComponentDatabases *cdbs, probe_context *context)
 		response_index ++;
 	}
 }
+#endif
 
 static
 void FtsLoop()

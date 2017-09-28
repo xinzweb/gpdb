@@ -127,7 +127,10 @@ extern int ftsprobe_start(void);
  * Interface for probing segments
  */
 extern void FtsProbeSegments(CdbComponentDatabases *dbs, uint8 *scan_status);
+
+#ifdef USE_SEGWALREP
 extern void FtsWalRepProbeSegments(probe_context *context);
+#endif
 
 /*
  * Interface for segment state checking
@@ -146,7 +149,7 @@ extern bool FtsIsActive(void);
 /*
  * Interface for WALREP specific checking
  */
-extern void HandleFtsProbe(void);
+extern void HandleFtsWalRepProbe(void);
 #endif
 
 /*
