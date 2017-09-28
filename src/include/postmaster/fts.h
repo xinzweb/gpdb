@@ -19,24 +19,24 @@
 #include "cdb/cdbutil.h"
 
 #ifdef USE_SEGWALREP
-typedef struct probe_response
+typedef struct
 {
 	int16 dbid;
 	bool isPrimaryAlive;
 	bool isMirrorAlive;
-}probe_response;
+}probe_result;
 
-typedef struct probe_context_per_thread
+typedef struct
 {
 	CdbComponentDatabaseInfo *segment_db_info;
-	probe_response *response;
+	probe_result result;
 	bool isScheduled;
-}probe_context_per_thread;
+}probe_response_per_segment;
 
-typedef struct probe_context
+typedef struct
 {
-	int16 count;
-	probe_context_per_thread *context;
+	int count;
+	probe_response_per_segment *responses;
 }probe_context;
 #endif
 
@@ -127,7 +127,7 @@ extern int ftsprobe_start(void);
  * Interface for probing segments
  */
 extern void FtsProbeSegments(CdbComponentDatabases *dbs, uint8 *scan_status);
-extern void FtsWalRepProbeSegments(CdbComponentDatabases *dbs, probe_response *scan_status);
+extern void FtsWalRepProbeSegments(probe_context *context);
 
 /*
  * Interface for segment state checking

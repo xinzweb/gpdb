@@ -79,7 +79,7 @@ typedef struct ProbeConnectionInfo
 	char mode;                           /* sync ('s'), resync ('r'), change-tracking ('c') */
 	GpMonotonicTime startTime;           /* probe start timestamp */
 #ifdef USE_SEGWALREP
-	probe_response *response;
+	probe_result *result;
 #endif
 	char segmentStatus;                  /* probed segment status */
 	int16 probe_errno;                   /* saved errno from the latest system call */
@@ -316,24 +316,19 @@ static char probeSegment(CdbComponentDatabaseInfo *dbInfo)
 }
 
 static void
-probeWalRepSegment(probe_context_per_thread *context)
+probeWalRepSegment(probe_response_per_segment *response)
 {
-	Assert(context);
-	probe_response *response = context->response;
-
 	Assert(response);
-	Assert(context->segment_db_info);
+	CdbComponentDatabaseInfo *segment_db_info = response->segment_db_info;
+	Assert(segment_db_info);
 
-	if(!FtsIsSegmentAlive(context->segment_db_info))
+	if(!FtsIsSegmentAlive(response->segment_db_info))
 	{
-		response->isPrimaryAlive = false;
-		response->isMirrorAlive = false;
+		response->result.isPrimaryAlive = false;
+		response->result.isMirrorAlive = false;
 
 		return;
 	}
-
-	CdbComponentDatabaseInfo *segment_db_info = context->segment_db_info;
-	Assert(segment_db_info != NULL);
 
 	/* setup probe descriptor */
 	ProbeConnectionInfo probeInfo;
@@ -342,7 +337,7 @@ probeWalRepSegment(probe_context_per_thread *context)
 	probeInfo.dbId = segment_db_info->dbid;
 	probeInfo.role = segment_db_info->role;
 	probeInfo.mode = segment_db_info->mode;
-	probeInfo.response = response;
+	probeInfo.result = &(response->result);
 
 	probeSegmentHelper(segment_db_info, probeInfo);
 }
@@ -350,36 +345,36 @@ probeWalRepSegment(probe_context_per_thread *context)
 static void *
 probeWalRepSegmentFromThread(void *arg)
 {
-	probe_context *contexts = (probe_context *)arg;
+	probe_context *context = (probe_context *)arg;
 
-	Assert(contexts);
+	Assert(context);
 
 	int number_of_probed_segments = 0;
 
-	while(number_of_probed_segments < contexts->count)
+	while(number_of_probed_segments < context->count)
 	{
 		/*
 		 * Look for the unprocessed context
 		 */
-		int context_index = number_of_probed_segments;
+		int response_index = number_of_probed_segments;
 
 		pthread_mutex_lock(&worker_thread_mutex);
-		while(context_index < contexts->count)
+		while(response_index < context->count)
 		{
-			if (!contexts->context[context_index].isScheduled)
+			if (!context->responses[response_index].isScheduled)
 			{
-				contexts->context[context_index].isScheduled = true;
+				context->responses[response_index].isScheduled = true;
 				break;
 			}
 			number_of_probed_segments++;
-			context_index++;
+			response_index++;
 		}
 		pthread_mutex_unlock(&worker_thread_mutex);
 
 		/*
 		 * If probed all the segments, we are done.
 		 */
-		if (context_index == contexts->count)
+		if (response_index == context->count)
 			break;
 
 		/*
@@ -388,50 +383,30 @@ probeWalRepSegmentFromThread(void *arg)
 		if (!FtsIsActive())
 			break;
 
-		/* now, let's probe the primary */
-		probe_context_per_thread *context = contexts->context + context_index;
-		probeWalRepSegment(context);
+		/* now let's probe the primary. */
+		probe_response_per_segment *response = context->responses + response_index;
+		Assert(SEGMENT_IS_ACTIVE_PRIMARY(response->segment_db_info));
+		probeWalRepSegment(response);
 	}
 
 	return NULL;
 }
 
 void
-FtsWalRepProbeSegments(CdbComponentDatabases *dbs, probe_response *responses)
+FtsWalRepProbeSegments(probe_context *context)
 {
 	int workers = gp_fts_probe_threadcount;
 	pthread_t *threads = NULL;
-	probe_context contexts;
-
-	Assert(responses);
-
-	contexts.count = dbs->total_segment_dbs;
-	contexts.context = (probe_context_per_thread *)palloc(contexts.count * sizeof(probe_context_per_thread));
-
-	for(int i = 0; i < contexts.count; i++)
-	{
-		probe_context_per_thread *context = &(contexts.context[i]);
-		CdbComponentDatabaseInfo *segment = &(dbs->segment_db_info[i]);
-
-		Assert(responses[i].dbid == segment->dbid);
-
-		context->segment_db_info = segment;
-		context->response = &(responses[i]);
-		context->response->isPrimaryAlive = false;
-		context->response->isMirrorAlive = false;
-		context->isScheduled = false;
-	}
+	Assert(context);
 
 	threads = (pthread_t *)palloc(workers * sizeof(pthread_t));
 
 	for(int i = 0; i < workers; i++)
 	{
-		int ret = gp_pthread_create(&threads[i], probeWalRepSegmentFromThread, &contexts, "FtsWalRepProbeSegments");
+		int ret = gp_pthread_create(&threads[i], probeWalRepSegmentFromThread, context, "FtsWalRepProbeSegments");
 
 		if (ret)
 		{
-			pfree(threads);
-			pfree(contexts.context);
 			ereport(ERROR, (errmsg("FTS: failed to create probing thread")));
 		}
 	}
@@ -442,14 +417,9 @@ FtsWalRepProbeSegments(CdbComponentDatabases *dbs, probe_response *responses)
 
 		if (ret)
 		{
-			pfree(threads);
-			pfree(contexts.context);
 			ereport(ERROR, (errmsg("FTS: failed to join probing thread")));
 		}
 	}
-
-	pfree(threads);
-	pfree(contexts.context);
 }
 
 /*
@@ -652,8 +622,8 @@ probeProcessResponse(ProbeConnectionInfo *probeInfo)
 	 */
 	ProbeResponse response;
 	pqGetnchar((char *)&response, sizeof(ProbeResponse), probeInfo->conn);
-	probeInfo->response->isPrimaryAlive = true;
-	probeInfo->response->isMirrorAlive = response.IsMirrorUp;
+	probeInfo->result->isPrimaryAlive = true;
+	probeInfo->result->isMirrorAlive = response.IsMirrorUp;
 	write_log("FTS: segment (content=%d, dbid=%d, role=%c) reported IsMirrorUp %d to the prober.",
 			  probeInfo->segmentId, probeInfo->dbId, probeInfo->role, response.IsMirrorUp);
 #else
