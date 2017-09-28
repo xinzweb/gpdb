@@ -549,7 +549,7 @@ probeWalRepPublishUpdate(probe_context *context)
 		CdbComponentDatabaseInfo *mirror = FtsGetPeerSegment(primary->segindex, primary->dbid);
 
 		bool IsPrimaryAlive = response->result.isPrimaryAlive;
-		bool IsMirrorAlive = response->result.isPrimaryAlive;
+		bool IsMirrorAlive = response->result.isMirrorAlive;
 
 		if (IsPrimaryAlive != SEGMENT_IS_ALIVE(primary))
 		{
