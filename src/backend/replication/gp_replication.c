@@ -32,7 +32,10 @@ bool IsMirrorUp(void)
 	 */
 	Assert(max_wal_senders == 1);
 
-	//LWLockAcquire(SyncRepLock, LW_SHARED);
+	/*
+	 * FIXME: uncomment LWLock once we got `fts probe handler`
+	 * LWLockAcquire(SyncRepLock, LW_SHARED);
+	 */
 	for (int i = 0; i < max_wal_senders; i++)
 	{
 		/* use volatile pointer to prevent code rearrangement */
@@ -48,7 +51,10 @@ bool IsMirrorUp(void)
 			}
 		}
 	}
-	//LWLockRelease(SyncRepLock);
+	/*
+	 * FIXME: uncomment LWLock once we got `fts probe handler`
+	 * LWLockRelease(SyncRepLock);
+	 */
 
 	return IsMirrorUp;
 }
