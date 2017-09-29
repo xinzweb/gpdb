@@ -332,19 +332,13 @@ def defargs():
 
     return parser.parse_args()
 
-def ForceFTSProbeScan(hostname, port, dbname):
+def ForceFTSProbeScan():
     '''Force FTS probe scan to reflect primary and mirror status in catalog.'''
 
-    query = "SELECT gp_request_fts_probe_scan()"
-    dburl = dbconn.DbURL(hostname, port, dbname)
-    print '%s: force FTS probe scan to refresh cluster configuration' % (datetime.datetime.now())
+    commands = []
+    commands.append("psql postgres -c \"SELECT gp_request_fts_probe_scan()\"")
 
-    try:
-        with dbconn.connect(dburl, utility=False) as conn:
-            dbconn.execSQL(conn, query).fetchall()
-    except Exception, e:
-        print e
-        sys.exit(1)
+    runcommands(commands, "Force FTS probe scan", "FTS probe refreshed catalog")
 
 if __name__ == "__main__":
     # Get parsed args
@@ -374,4 +368,4 @@ if __name__ == "__main__":
         DestroyMirrors(cluster_config).run()
 
     # Force FTS probe scan
-    ForceFTSProbeScan(args.host, args.port, args.database)
+    ForceFTSProbeScan()
