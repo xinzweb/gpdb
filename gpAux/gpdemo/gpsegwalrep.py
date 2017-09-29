@@ -332,6 +332,20 @@ def defargs():
 
     return parser.parse_args()
 
+def ForceFTSProbeScan(hostname, port, dbname):
+    '''Force FTS probe scan to reflect primary and mirror status in catalog.'''
+
+    query = "SELECT gp_request_fts_probe_scan()"
+    dburl = dbconn.DbURL(hostname, port, dbname)
+    print '%s: force FTS probe scan to refresh cluster configuration' % (datetime.datetime.now())
+
+    try:
+        with dbconn.connect(dburl, utility=False) as conn:
+            dbconn.execSQL(conn, query).fetchall()
+    except Exception, e:
+        print e
+        sys.exit(1)
+
 if __name__ == "__main__":
     # Get parsed args
     args = defargs()
@@ -358,3 +372,6 @@ if __name__ == "__main__":
         StopInstances(cluster_config, segment_type='m').run()
     elif args.operation == 'destroy':
         DestroyMirrors(cluster_config).run()
+
+    # Force FTS probe scan
+    ForceFTSProbeScan(args.host, args.port, args.database)
