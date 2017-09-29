@@ -2693,7 +2693,11 @@ ProcessStartupPacket(Port *port, bool SSLdone)
 	    /* disable the authentication timeout in case it takes a long time */
         if (!disable_sig_alarm(false))
             elog(FATAL, "could not disable timer for authorization timeout");
+#ifdef USE_SEGWALREP
+		HandleFtsWalRepProbe();
+#else
 		processPrimaryMirrorTransitionQuery(port, buf);
+#endif
 		return 127;
 	}
 
@@ -3573,7 +3577,6 @@ processPrimaryMirrorTransitionRequest(Port *port, void *pkt)
 	}
 }
 
-#ifndef USE_SEGWALREP
 static void
 sendPrimaryMirrorTransitionQuery(uint32 mode, uint32 segstate, uint32 datastate, uint32 faulttype)
 {
@@ -3591,7 +3594,6 @@ sendPrimaryMirrorTransitionQuery(uint32 mode, uint32 segstate, uint32 datastate,
 	pq_endmessage(&buf);
 	pq_flush();
 }
-#endif
 
 /**
  * Called during startup packet processing.
@@ -3602,10 +3604,6 @@ sendPrimaryMirrorTransitionQuery(uint32 mode, uint32 segstate, uint32 datastate,
 static void
 processPrimaryMirrorTransitionQuery(Port *port, void *pkt)
 {
-#ifdef USE_SEGWALREP
-	/* Handle FTS probe and send response */
-	HandleFtsWalRepProbe();
-#else
 	PrimaryMirrorTransitionPacket *transition = (PrimaryMirrorTransitionPacket *) pkt;
 	int length;
 
@@ -3688,7 +3686,6 @@ processPrimaryMirrorTransitionQuery(Port *port, void *pkt)
 	sendPrimaryMirrorTransitionQuery((uint32)pm_mode, (uint32)s_state, (uint32)d_state, (uint32)f_type);
 
 	return;
-#endif
 }
 
 /*
