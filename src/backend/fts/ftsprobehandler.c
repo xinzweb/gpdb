@@ -33,7 +33,6 @@ SendProbeResponse(ProbeResponse *response)
 	pq_flush();
 }
 
-#ifdef USE_SEGWALREP
 void
 HandleFtsWalRepProbe()
 {
@@ -42,4 +41,3 @@ HandleFtsWalRepProbe()
 	response.IsMirrorUp = IsMirrorUp();
 	SendProbeResponse(&response);
 }
-#endif
