@@ -346,7 +346,9 @@ class ColdMasterClusterConfiguration(ClusterConfiguration):
     def __init__(self, port, master_directory):
         self.seg_configs = []
 
-        master_seg_config = GpSegmentConfiguration(1, -1, port, master_directory, GpSegmentConfiguration.ROLE_PRIMARY)
+        master_seg_config = GpSegmentConfiguration(1, -1, port, master_directory,
+                                                   GpSegmentConfiguration.ROLE_PRIMARY,
+                                                   GpSegmentConfiguration.MIRROR_UP)
         self.seg_configs.append(master_seg_config)
 
         self.num_contents = 1 # need to be > 1 to avoid assert failure
