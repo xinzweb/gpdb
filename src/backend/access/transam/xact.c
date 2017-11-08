@@ -584,7 +584,6 @@ GetCurrentSubTransactionId(void)
 	return s->subTransactionId;
 }
 
-
 /*
  *	GetCurrentCommandId
  *
@@ -600,6 +599,16 @@ GetCurrentCommandId(bool used)
 	if (used)
 		currentCommandIdUsed = true;
 	return currentCommandId;
+}
+
+void
+AssertCurrentTransactionIsTblockDefault(void)
+{
+	TBlockState state = CurrentTransactionState->blockState;
+	if(state != TBLOCK_DEFAULT && state != TBLOCK_INPROGRESS && state != TBLOCK_STARTED)
+	{
+		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("The blockState is %d", state)));
+	}
 }
 
 /*

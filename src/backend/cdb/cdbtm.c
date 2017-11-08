@@ -3476,6 +3476,8 @@ isDtxQueryDispatcher(void)
 void
 setupRegularDtxContext(void)
 {
+	AssertCurrentTransactionIsTblockDefault();
+
 	switch (DistributedTransactionContext)
 	{
 		case DTX_CONTEXT_QD_DISTRIBUTED_CAPABLE:

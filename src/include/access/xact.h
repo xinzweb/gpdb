@@ -192,6 +192,7 @@ extern TransactionId GetCurrentTransactionId(void);
 extern TransactionId GetCurrentTransactionIdIfAny(void);
 extern SubTransactionId GetCurrentSubTransactionId(void);
 extern CommandId GetCurrentCommandId(bool used);
+extern void AssertCurrentTransactionIsTblockDefault(void);
 extern TimestampTz GetCurrentTransactionStartTimestamp(void);
 extern TimestampTz GetCurrentStatementStartTimestamp(void);
 extern TimestampTz GetCurrentTransactionStopTimestamp(void);
