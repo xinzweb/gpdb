@@ -24,7 +24,14 @@ void
 mock_FtsIsActive(FtsProbeInfo *fts_info, bool expected_return_value)
 {
 	ftsProbeInfo = fts_info;
-	ftsProbeInfo->fts_discardResults = !expected_return_value;
+	if (shutdown_requested)
+	{
+		ftsProbeInfo->fts_discardResults = false;
+	}
+	else
+	{
+		ftsProbeInfo->fts_discardResults = !expected_return_value;
+	}
 }
 
 /*
@@ -46,6 +53,33 @@ test_probeWalRepPublishUpdate_for_FtsIsActive_false(void **state)
 	mock_FtsIsActive(&fts_info, false);
 
 	bool result = probeWalRepPublishUpdate(&context);
+
+	assert_false(result);
+}
+
+/*
+ * Case: 1 segment, is_updated is false, because shutdown_requested is true.
+ */
+void
+test_probeWalRepPublishUpdate_for_shutdown_requested(void **state)
+{
+	probe_context context;
+	context.count = 1;
+	probe_response_per_segment response;
+	context.responses = &response;
+	CdbComponentDatabaseInfo info;
+	response.segment_db_info = &info;
+	info.role = GP_SEGMENT_CONFIGURATION_ROLE_PRIMARY;
+
+	/* mock FtsIsActive true */
+	FtsProbeInfo fts_info;
+	shutdown_requested = true;
+	mock_FtsIsActive(&fts_info, true);
+
+	bool result = probeWalRepPublishUpdate(&context);
+
+	/* restore the original value to let the rest of the test pass */
+	shutdown_requested = false;
 
 	assert_false(result);
 }
@@ -211,6 +245,7 @@ main(int argc, char* argv[])
 
 	const UnitTest tests[] = {
 		unit_test(test_probeWalRepPublishUpdate_for_zero_segment),
+		unit_test(test_probeWalRepPublishUpdate_for_shutdown_requested),
 		unit_test(test_probeWalRepPublishUpdate_for_FtsIsActive_false),
 		unit_test(test_probeWalRepPublishUpdate_no_update),
 		unit_test(test_probeWalRepPublishUpdate_update_primary),
