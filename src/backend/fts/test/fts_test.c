@@ -21,10 +21,9 @@ test_probeWalRepPublishUpdate_for_zero_segment(void **state)
 
 /* mock FtsIsActive */
 void
-mock_FtsIsActive(bool expected_return_value)
+mock_FtsIsActive(FtsProbeInfo *fts_info, bool expected_return_value)
 {
-	FtsProbeInfo fts_info;
-	ftsProbeInfo = &fts_info;
+	ftsProbeInfo = fts_info;
 	ftsProbeInfo->fts_discardResults = !expected_return_value;
 }
 
@@ -43,7 +42,8 @@ test_probeWalRepPublishUpdate_for_FtsIsActive_false(void **state)
 	info.role = GP_SEGMENT_CONFIGURATION_ROLE_PRIMARY;
 
 	/* mock FtsIsActive false */
-	mock_FtsIsActive(false);
+	FtsProbeInfo fts_info;
+	mock_FtsIsActive(&fts_info, false);
 
 	bool result = probeWalRepPublishUpdate(&context);
 
@@ -71,7 +71,8 @@ test_probeWalRepPublishUpdate_no_update(void **state)
 	primary.status = GP_SEGMENT_CONFIGURATION_STATUS_UP;
 
 	/* mock FtsIsActive true */
-	mock_FtsIsActive(true);
+	FtsProbeInfo fts_info;
+	mock_FtsIsActive(&fts_info, true);
 
 	/* mock mirror from FtsGetPeerSegment */
 	CdbComponentDatabases databases;
@@ -106,6 +107,7 @@ static void
 mock_primary_and_mirror_probe_response(
 	probe_context *context,
 	probe_response_per_segment *response,
+	FtsProbeInfo *fts_info,
 	CdbComponentDatabases *databases,
 	CdbComponentDatabaseInfo *primary,
 	CdbComponentDatabaseInfo *mirror,
@@ -123,7 +125,7 @@ mock_primary_and_mirror_probe_response(
 	primary->status = GP_SEGMENT_CONFIGURATION_STATUS_UP;
 
 	/* mock FtsIsActive true */
-	mock_FtsIsActive(true);
+	mock_FtsIsActive(fts_info, true);
 
 	/* mock mirror UP from FtsGetPeerSegment */
 	cdb_component_dbs = databases;
@@ -157,6 +159,7 @@ test_probeWalRepPublishUpdate_update_primary(void **state)
 {
 	probe_context context;
 	probe_response_per_segment response;
+	FtsProbeInfo fts_info;
 	CdbComponentDatabaseInfo primary;
 	CdbComponentDatabases databases;
 	CdbComponentDatabaseInfo mirror;
@@ -164,6 +167,7 @@ test_probeWalRepPublishUpdate_update_primary(void **state)
 	mock_primary_and_mirror_probe_response(
 		&context,
 		&response,
+		&fts_info,
 		&databases,
 		&primary,
 		&mirror,
@@ -180,6 +184,7 @@ test_probeWalRepPublishUpdate_update_mirror(void **state)
 {
 	probe_context context;
 	probe_response_per_segment response;
+	FtsProbeInfo fts_info;
 	CdbComponentDatabaseInfo primary;
 	CdbComponentDatabases databases;
 	CdbComponentDatabaseInfo mirror;
@@ -187,6 +192,7 @@ test_probeWalRepPublishUpdate_update_mirror(void **state)
 	mock_primary_and_mirror_probe_response(
 			&context,
 			&response,
+			&fts_info,
 			&databases,
 			&primary,
 			&mirror,
