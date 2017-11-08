@@ -19,5 +19,9 @@ ftsprobehandler.t: \
 fts.t: \
     $(MOCK_DIR)/backend/access/transam/xact_mock.o \
     $(MOCK_DIR)/backend/utils/time/snapmgr_mock.o \
-    $(MOCK_DIR)/backend/access/heap/heapam_mock.o
+    $(MOCK_DIR)/backend/access/heap/heapam_mock.o \
+    $(MOCK_DIR)/backend/access/common/heaptuple_mock.o \
+    $(MOCK_DIR)/backend/catalog/indexing_mock.o \
+    $(MOCK_DIR)/backend/access/common/scankey_mock.o \
+    $(MOCK_DIR)/backend/access/index/genam_mock.o
 endif

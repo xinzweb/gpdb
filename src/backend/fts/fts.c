@@ -79,11 +79,6 @@ static uint8 scan_status[MAX_NUM_OF_SEGMENTS];
 /*
  * STATIC VARIABLES
  */
-
-#ifdef USE_ASSERT_CHECKING
-static bool mock_probeWalRepUpdateConfig = false;
-#endif
-
 static bool am_ftsprobe = false;
 
 static volatile bool shutdown_requested = false;
@@ -400,10 +395,6 @@ readCdbComponentInfoAndUpdateStatus(MemoryContext probeContext)
 static void
 probeWalRepUpdateConfig(int16 dbid, int16 segindex, bool IsSegmentAlive)
 {
-#ifdef USE_ASSERT_CHECKING
-	if (mock_probeWalRepUpdateConfig)
-		return;
-#endif
 	/*
 	 * Insert new tuple into gp_configuration_history catalog.
 	 */
