@@ -392,8 +392,13 @@ readCdbComponentInfoAndUpdateStatus(MemoryContext probeContext)
 }
 
 #ifdef USE_SEGWALREP
+
+#ifndef probeWalRepUpdateConfig
+#define probeWalRepUpdateConfig probeWalRepUpdateConfigImp
+#endif
+
 static void
-probeWalRepUpdateConfig(int16 dbid, int16 segindex, bool IsSegmentAlive)
+probeWalRepUpdateConfigImp(int16 dbid, int16 segindex, bool IsSegmentAlive)
 {
 	/*
 	 * Insert new tuple into gp_configuration_history catalog.

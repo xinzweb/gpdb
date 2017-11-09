@@ -3,6 +3,22 @@
 #include <setjmp.h>
 #include "cmockery.h"
 
+#include "postgres.h"
+
+#define probeWalRepUpdateConfig probeWalRepUpdateConfig_mock
+
+static int16 expected_probeWalRepUpdateConfig_dbid;
+static int16 expected_probeWalRepUpdateConfig_segindex;
+static bool expected_probeWalRepUpdateConfig_isSegmentAlive;
+
+void
+probeWalRepUpdateConfig_mock(int16 dbid, int16 segindex, bool isSegmentAlive)
+{
+	assert_int_equal(dbid, expected_probeWalRepUpdateConfig_dbid);
+	assert_int_equal(segindex, expected_probeWalRepUpdateConfig_segindex);
+	assert_int_equal(isSegmentAlive, expected_probeWalRepUpdateConfig_isSegmentAlive);
+}
+
 /* Actual function body */
 #include "../fts.c"
 
@@ -86,85 +102,6 @@ test_probeWalRepPublishUpdate_for_shutdown_requested(void **state)
 }
 
 static void
-probeWalRepUpdateConfig_will_be_called_with(
-		int16 dbid,
-		int16 segindex,
-		bool IsSegmentAlive)
-{
-	/* Mock heap_open gp_configuration_history_relation */
-	static RelationData gp_configuration_history_relation;
-	expect_value(heap_open, relationId, GpConfigHistoryRelationId);
-	expect_any(heap_open, lockmode);
-	will_return(heap_open, &gp_configuration_history_relation);
-
-	/* Mock heap_open gp_segment_configuration_relation */
-	static RelationData gp_segment_configuration_relation;
-	expect_value(heap_open, relationId, GpSegmentConfigRelationId);
-	expect_any(heap_open, lockmode);
-	will_return(heap_open, &gp_segment_configuration_relation);
-
-	/* Mock heap_form_tuple inline function */
-	expect_any_count(heaptuple_form_to, tupleDescriptor, -1);
-	expect_any_count(heaptuple_form_to, values, -1);
-	expect_any_count(heaptuple_form_to, isnull, -1);
-	expect_any_count(heaptuple_form_to, dst, -1);
-	expect_any_count(heaptuple_form_to, dstlen, -1);
-	will_be_called_count(heaptuple_form_to, -1);
-
-	/* Mock simple_heap_insert */
-	expect_any_count(simple_heap_insert, relation, -1);
-	expect_any_count(simple_heap_insert, tup, -1);
-	will_be_called_count(simple_heap_insert, -1);
-
-	/* Mock CatalogUpdateIndexes */
-	expect_any_count(CatalogUpdateIndexes, heapRel, -1);
-	expect_any_count(CatalogUpdateIndexes, heapTuple, -1);
-	will_be_called_count(CatalogUpdateIndexes, -1);
-
-	/* Mock heap_close */
-	expect_any_count(relation_close, relation, -1);
-	expect_any_count(relation_close, lockmode, -1);
-	will_be_called_count(relation_close, -1);
-
-	/* Mock ScanKeyInit */
-	expect_any_count(ScanKeyInit, entry, -1);
-	expect_any_count(ScanKeyInit, attributeNumber, -1);
-	expect_any_count(ScanKeyInit, strategy, -1);
-	expect_any_count(ScanKeyInit, procedure, -1);
-	expect_any_count(ScanKeyInit, argument, -1);
-	will_be_called_count(ScanKeyInit, -1);
-
-	/* Mock systable_beginscan */
-	expect_any_count(systable_beginscan, heapRelation, -1);
-	expect_any_count(systable_beginscan, indexId, -1);
-	expect_any_count(systable_beginscan, indexOK, -1);
-	expect_any_count(systable_beginscan, snapshot, -1);
-	expect_any_count(systable_beginscan, nkeys, -1);
-	expect_any_count(systable_beginscan, key, -1);
-	will_be_called_count(systable_beginscan, -1);
-
-	static HeapTupleData config_tuple;
-	expect_any(systable_getnext, sysscan);
-	will_return(systable_getnext, &config_tuple);
-
-	HeapTuple new_tuple = palloc(sizeof(HeapTupleData));
-	expect_any(heap_modify_tuple, tuple);
-	expect_any(heap_modify_tuple, tupleDesc);
-	expect_any(heap_modify_tuple, replValues);
-	expect_any(heap_modify_tuple, replIsnull);
-	expect_any(heap_modify_tuple, doReplace);
-	will_return(heap_modify_tuple, new_tuple);
-
-	expect_any_count(simple_heap_update, relation, -1);
-	expect_any_count(simple_heap_update, otid, -1);
-	expect_any_count(simple_heap_update, tup, -1);
-	will_be_called_count(simple_heap_update, -1);
-
-	expect_any_count(systable_endscan, sysscan, -1);
-	will_be_called_count(systable_endscan, -1);
-}
-
-static void
 mock_primary_and_mirror_probe_response(
 		probe_context *context,
 		bool expected_isPrimaryAlive,
@@ -209,10 +146,23 @@ mock_primary_and_mirror_probe_response(
 		will_be_called(GetTransactionSnapshot);
 
 		/* mock probeWalRepUpdateConfig */
-		probeWalRepUpdateConfig_will_be_called_with(
-				primary.dbid,
-				primary.segindex,
-				response.result.isPrimaryAlive);
+		if(!expected_isPrimaryAlive)
+		{
+			expected_probeWalRepUpdateConfig_dbid = primary.dbid;
+			expected_probeWalRepUpdateConfig_segindex = primary.segindex;
+			expected_probeWalRepUpdateConfig_isSegmentAlive = response.result.isPrimaryAlive;
+		}
+		else if (!expected_isMirrorAlive)
+		{
+			expected_probeWalRepUpdateConfig_dbid = mirror.dbid;
+			expected_probeWalRepUpdateConfig_segindex = mirror.segindex;
+			expected_probeWalRepUpdateConfig_isSegmentAlive = response.result.isMirrorAlive;
+		}
+		else
+		{
+			/* never reachable */
+			fail();
+		}
 
 		will_be_called(CommitTransactionCommand);
 	}
