@@ -12,10 +12,8 @@
  */
 
 #include "replication/gp_replication.h"
-#include "utils/guc.h"
-
-#include "replication/walsender.h"
 #include "replication/walsender_private.h"
+#include "utils/builtins.h"
 
 /*
  * Checking the WalSndCtl to figure out whether the mirror is up or not.
@@ -77,4 +75,10 @@ SetSyncStandbysDefined(void)
 	}
 
 	LWLockRelease(SyncRepLock);
+}
+
+Datum
+gp_replication_error(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_TEXT_P(cstring_to_text(WalSndCtl->error == WALSNDERROR_WALREAD ? "walread" : "none"));
 }
