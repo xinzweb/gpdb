@@ -474,6 +474,13 @@ WalRcvDie(int code, Datum arg)
 
 	/* Terminate the connection gracefully. */
 	walrcv_disconnect();
+
+	/*
+	 * Signal the startup process to avoid it waiting for us (for latch
+	 * timeout duration) and instead let it move ahead to quickly respawn
+	 * walreceiver soon.
+	 */
+	WakeupRecovery();
 }
 
 /* SIGHUP: set flag to re-read config file at next convenient time */
