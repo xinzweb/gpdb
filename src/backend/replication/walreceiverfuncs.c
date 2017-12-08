@@ -241,13 +241,33 @@ RequestXLogStreaming(XLogRecPtr recptr, const char *conninfo)
 
 	SpinLockRelease(&walrcv->mutex);
 
-	SendPostmasterSignal(PMSIGNAL_START_WALRECEIVER);
+	WalRcvState state = WALRCV_STARTING;
+	do
+	{
+		now = (pg_time_t) time(NULL);
 
-	elogif(debug_xlog_record_read, LOG,
-		   "request streaming -- spawning walreceiver requested with "
-		   "receivestart = %X/%X",
-		   walrcv->receiveStart.xlogid, walrcv->receiveStart.xrecoff);
+		SpinLockAcquire(&walrcv->mutex);
+		if (walrcv->walRcvState == WALRCV_STOPPED)
+		{
+			walrcv->walRcvState = WALRCV_STARTING;
+			walrcv->startTime = now;
+		}
+		SpinLockRelease(&walrcv->mutex);
 
+		SendPostmasterSignal(PMSIGNAL_START_WALRECEIVER);
+
+		elogif(debug_xlog_record_read, LOG,
+		       "request streaming -- spawning walreceiver requested with "
+			       "receivestart = %X/%X",
+		       walrcv->receiveStart.xlogid, walrcv->receiveStart.xrecoff);
+
+		SpinLockAcquire(&walrcv->mutex);
+		state = walrcv->walRcvState;
+		SpinLockRelease(&walrcv->mutex);
+
+		/* sleep for 100ms to avoid tight loop */
+		pg_usleep(100*1000);
+	} while (state != WALRCV_RUNNING);
 }
 
 /*

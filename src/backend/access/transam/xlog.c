@@ -4063,7 +4063,6 @@ XLogPageRead(XLogRecPtr *RecPtr, int emode, bool fetching_ckpt,
 	uint32		targetRecOff;
 	uint32		targetId;
 	uint32		targetSeg;
-	static pg_time_t last_fail_time = 0;
 
 	XLByteToSeg(*RecPtr, targetId, targetSeg);
 	targetPageOff = ((RecPtr->xrecoff % XLogSegSize) / XLOG_BLCKSZ) * XLOG_BLCKSZ;
@@ -4233,7 +4232,6 @@ retry:
 				else
 				{
 					int			sources;
-					pg_time_t	now;
 
 					if (readFile >= 0)
 					{
@@ -4264,18 +4262,6 @@ retry:
 
 						elogif(debug_xlog_record_read, LOG,
 							   "xlog page read -- All read sources have failed. So, retry.");
-
-						/*
-						 * If it hasn't been long since last attempt, sleep to
-						 * avoid busy-waiting.
-						 */
-						now = (pg_time_t) time(NULL);
-						if ((now - last_fail_time) < 5)
-						{
-							pg_usleep(1000000L * (5 - (now - last_fail_time)));
-							now = (pg_time_t) time(NULL);
-						}
-						last_fail_time = now;
 
 						/*
 						 * If primary_conninfo is set, launch walreceiver to
