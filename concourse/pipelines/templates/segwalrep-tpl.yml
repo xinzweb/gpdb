@@ -361,11 +361,6 @@ resource_types:
 ## ======================================================================
 
 resources:
-{% if "CS" in test_sections or
-      "DPM" in test_sections or
-      "FileRep" in test_sections or
-      "MPP" in test_sections or
-      "MM" in test_sections %}
 - name: ccp_src
   type: git
   source:
@@ -374,7 +369,6 @@ resources:
     uri: {{ccp-git-remote}}
     tag_filter: {{ccp-tag-filter}}
 
-{% if "centos6" in os_types %}
 - name: terraform
   type: terraform
   source:
@@ -403,8 +397,6 @@ resources:
       ###########################################################
       bucket_path: {{tf-bucket-path}}
 
-{% endif %}
-{% endif %}
 {% if "DPM" in test_sections %}
 - name: terraform2
   type: terraform
