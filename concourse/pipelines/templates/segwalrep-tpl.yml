@@ -1498,6 +1498,7 @@ jobs:
       vars:
         <<: *ccp_default_vars
         platform: sles12
+        aws_ebs_volume_size: 128
         aws_instance-node-instance_type: m4.xlarge
         number_of_nodes: 1
   - task: gen_cluster
@@ -1545,6 +1546,7 @@ jobs:
       vars:
         <<: *ccp_default_vars
         platform: sles12
+        aws_ebs_volume_size: 128
         aws_instance-node-instance_type: m4.xlarge
         number_of_nodes: 1
   - task: gen_cluster
