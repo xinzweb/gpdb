@@ -119,21 +119,29 @@ class SQLIsolationExecutor(object):
             self.dbname = dbname
             if self.utility_mode:
                 (hostname, port) = self.get_utility_mode_port(name)
-                self.con = pygresql.pg.connect(host=hostname, 
-                    port=port, 
-                    opt="-c gp_session_role=utility",
-                    dbname=self.dbname)
+                self.con = self.connectdb(given_host=hostname,
+                    given_port=port,
+                    given_opt="-c gp_session_role=utility",
+                    given_dbname=self.dbname)
             else:
-                self.con = self.connectdb()
+                self.con = self.connectdb(self.dbname)
 
             self.filename = "%s.%s" % (output_file, os.getpid())
 
-        def connectdb(self):
+        def connectdb(self, given_dbname, given_host = None, given_port = None, given_opt = None):
             con = None
             retry = 1000
             while retry:
                 try:
-                    con = pygresql.pg.connect(dbname=self.dbname)
+                    if (given_host is None):
+                        con = pygresql.pg.connect(dbname=given_dbname)
+                    else:
+                        assert (given_port is not None)
+                        assert (given_opt is not None)
+                        con = pygresql.pg.connect(host= given_host,
+                                              port= given_port,
+                                              opt= given_opt,
+                                              dbname= given_dbname)
                     break
                 except Exception as e:
                     if (("the database system is starting up" in str(e) or
@@ -150,7 +158,7 @@ class SQLIsolationExecutor(object):
                 Gets the port number/hostname combination of the
                 dbid with the id = name
             """
-            con = self.connectdb()
+            con = self.connectdb(self.dbname)
             r = con.query("SELECT hostname, port FROM gp_segment_configuration WHERE dbid = %s" % name).getresult()
             if len(r) == 0:
                 raise Exception("Invalid dbid %s" % name)

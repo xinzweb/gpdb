@@ -43,53 +43,53 @@ content|preferred_role|role|status|mode
 -- fully recover the failed primary as new mirror
 !\retcode ../../../gpAux/gpdemo/gpsegwalrep.py recoverfull;
 -- start_ignore
-2018-01-07 11:24:38.589659: fetching cluster configuration
-2018-01-07 11:24:38.603590: fetched cluster configuration
+2018-01-08 16:00:58.097007: fetching cluster configuration
+2018-01-08 16:00:58.104765: fetched cluster configuration
 found 3 distinct content IDs
-Mirror content 0:  2018-01-07 11:24:38.626292: Running command... rm -rf /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
+Mirror content 0:  2018-01-08 16:00:58.129024: Running command... rm -rf /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
 Mirror content 0:  
-Mirror content 0:  2018-01-07 11:24:38.717320: Running command... pg_basebackup -x -R -c fast -E ./pg_log -E ./db_dumps -E ./gpperfmon/data -E ./gpperfmon/logs -D /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0 -h localhost -p 25435
+Mirror content 0:  2018-01-08 16:00:58.174251: Running command... pg_basebackup -x -R -c fast -E ./pg_log -E ./db_dumps -E ./gpperfmon/data -E ./gpperfmon/logs -D /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0 -h localhost -p 25435
 Mirror content 0:  NOTICE:  WAL archiving is not enabled; you must ensure that all required WAL segments are copied through other means to complete the backup
 Mirror content 0:  
-Mirror content 0:  2018-01-07 11:24:39.152190: Running command... mkdir /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0/pg_log; mkdir /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0/pg_xlog/archive_status
+Mirror content 0:  2018-01-08 16:00:58.804815: Running command... mkdir /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0/pg_log; mkdir /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0/pg_xlog/archive_status
 Mirror content 0:  
-Mirror content 0:  2018-01-07 11:24:39.164326: Initialized mirror at /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
+Mirror content 0:  2018-01-08 16:00:58.812926: Initialized mirror at /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
 
-Segment primary content 0:  2018-01-07 11:24:39.164700: Running command... pg_ctl -D /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0  -o '-p 25432 --gp_dbid=0 --silent-mode=true -i -M mirrorless --gp_contentid=0 --gp_num_contents_in_cluster=3' start
+Segment primary content 0:  2018-01-08 16:00:58.813229: Running command... pg_ctl -D /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0  -o '-p 25432 --gp_dbid=0 --silent-mode=true -i -M mirrorless --gp_contentid=0 --gp_num_contents_in_cluster=3' start
 Segment primary content 0:  server starting
 Segment primary content 0:  
-Segment primary content 0:  2018-01-07 11:24:39.197011: Running command... pg_ctl -D /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0 status
-Segment primary content 0:  pg_ctl: server is running (PID: 62409)
+Segment primary content 0:  2018-01-08 16:00:58.846892: Running command... pg_ctl -D /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0 status
+Segment primary content 0:  pg_ctl: server is running (PID: 4006)
 Segment primary content 0:  
-Segment primary content 0:  2018-01-07 11:24:39.209245: Started primary segment with content 0 and port 25432 at /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
+Segment primary content 0:  2018-01-08 16:00:58.849761: Started primary segment with content 0 and port 25432 at /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
 
-Force FTS probe scan:  2018-01-07 11:24:39.209430: Running command... psql postgres -c "SELECT gp_request_fts_probe_scan()"
+Force FTS probe scan:  2018-01-08 16:00:58.849919: Running command... psql postgres -c "SELECT gp_request_fts_probe_scan()"
 Force FTS probe scan:   gp_request_fts_probe_scan 
 Force FTS probe scan:  ---------------------------
 Force FTS probe scan:   t
 Force FTS probe scan:  (1 row)
 Force FTS probe scan:  
 Force FTS probe scan:  
-Force FTS probe scan:  2018-01-07 11:24:40.253186: FTS probe refreshed catalog
+Force FTS probe scan:  2018-01-08 16:00:59.914176: FTS probe refreshed catalog
 
-2018-01-07 11:24:40.253288: fetching cluster configuration
-2018-01-07 11:24:40.274012: fetched cluster configuration
+2018-01-08 16:00:59.914229: fetching cluster configuration
+2018-01-08 16:00:59.924334: fetched cluster configuration
 found 3 distinct content IDs
-:  2018-01-07 11:24:40.293600: Running command... psql postgres -c "select * from gp_segment_configuration order by content, dbid"
-:   dbid | content | role | preferred_role | mode | status | port  | hostname  |  address  | replication_port 
-:  ------+---------+------+----------------+------+--------+-------+-----------+-----------+------------------
-:      1 |      -1 | p    | p              | n    | u      | 15432 | pchampion | pchampion |                 
-:      8 |      -1 | m    | m              | s    | u      | 16432 | pchampion | pchampion |                 
-:      2 |       0 | m    | p              | s    | u      | 25432 | pchampion | pchampion |                 
-:      5 |       0 | p    | m              | s    | u      | 25435 | pchampion | pchampion |                 
-:      3 |       1 | p    | p              | s    | u      | 25433 | pchampion | pchampion |                 
-:      7 |       1 | m    | m              | s    | u      | 25436 | pchampion | pchampion |                 
-:      4 |       2 | p    | p              | s    | u      | 25434 | pchampion | pchampion |                 
-:      6 |       2 | m    | m              | s    | u      | 25437 | pchampion | pchampion |                 
+:  2018-01-08 16:00:59.937801: Running command... psql postgres -c "select * from gp_segment_configuration order by content, dbid"
+:   dbid | content | role | preferred_role | mode | status | port  |  hostname   |   address   |                                    datadir                                    
+:  ------+---------+------+----------------+------+--------+-------+-------------+-------------+-------------------------------------------------------------------------------
+:      1 |      -1 | p    | p              | n    | u      | 15432 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/qddir/demoDataDir-1
+:      8 |      -1 | m    | m              | s    | u      | 16432 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/standby
+:      2 |       0 | m    | p              | s    | u      | 25432 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
+:      5 |       0 | p    | m              | s    | u      | 25435 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
+:      3 |       1 | p    | p              | s    | u      | 25433 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast2/demoDataDir1
+:      6 |       1 | m    | m              | s    | u      | 25436 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror2/demoDataDir1
+:      4 |       2 | p    | p              | s    | u      | 25434 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast3/demoDataDir2
+:      7 |       2 | m    | m              | s    | u      | 25437 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror3/demoDataDir2
 :  (8 rows)
 :  
 :  
-:  2018-01-07 11:24:40.326572: 
+:  2018-01-08 16:00:59.950212: 
 
 
 -- end_ignore
@@ -137,53 +137,53 @@ content|preferred_role|role|status|mode
 -- now, let's fully recover the mirror
 !\retcode ../../../gpAux/gpdemo/gpsegwalrep.py recoverfull;
 -- start_ignore
-2018-01-07 11:24:46.551038: fetching cluster configuration
-2018-01-07 11:24:46.564062: fetched cluster configuration
+2018-01-08 16:01:06.212959: fetching cluster configuration
+2018-01-08 16:01:06.218760: fetched cluster configuration
 found 3 distinct content IDs
-Mirror content 0:  2018-01-07 11:24:46.584071: Running command... rm -rf /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
+Mirror content 0:  2018-01-08 16:01:06.233588: Running command... rm -rf /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
 Mirror content 0:  
-Mirror content 0:  2018-01-07 11:24:46.673391: Running command... pg_basebackup -x -R -c fast -E ./pg_log -E ./db_dumps -E ./gpperfmon/data -E ./gpperfmon/logs -D /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0 -h localhost -p 25432
+Mirror content 0:  2018-01-08 16:01:06.288272: Running command... pg_basebackup -x -R -c fast -E ./pg_log -E ./db_dumps -E ./gpperfmon/data -E ./gpperfmon/logs -D /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0 -h localhost -p 25432
 Mirror content 0:  NOTICE:  WAL archiving is not enabled; you must ensure that all required WAL segments are copied through other means to complete the backup
 Mirror content 0:  
-Mirror content 0:  2018-01-07 11:24:47.262256: Running command... mkdir /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0/pg_log; mkdir /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0/pg_xlog/archive_status
+Mirror content 0:  2018-01-08 16:01:06.726959: Running command... mkdir /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0/pg_log; mkdir /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0/pg_xlog/archive_status
 Mirror content 0:  
-Mirror content 0:  2018-01-07 11:24:47.278326: Initialized mirror at /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
+Mirror content 0:  2018-01-08 16:01:06.732329: Initialized mirror at /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
 
-Segment mirror content 0:  2018-01-07 11:24:47.278860: Running command... pg_ctl -D /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0  -o '-p 25435 --gp_dbid=0 --silent-mode=true -i -M mirrorless --gp_contentid=0 --gp_num_contents_in_cluster=3' start
+Segment mirror content 0:  2018-01-08 16:01:06.732833: Running command... pg_ctl -D /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0  -o '-p 25435 --gp_dbid=0 --silent-mode=true -i -M mirrorless --gp_contentid=0 --gp_num_contents_in_cluster=3' start
 Segment mirror content 0:  server starting
 Segment mirror content 0:  
-Segment mirror content 0:  2018-01-07 11:24:47.330146: Running command... pg_ctl -D /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0 status
-Segment mirror content 0:  pg_ctl: server is running (PID: 62468)
+Segment mirror content 0:  2018-01-08 16:01:06.765965: Running command... pg_ctl -D /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0 status
+Segment mirror content 0:  pg_ctl: server is running (PID: 4285)
 Segment mirror content 0:  
-Segment mirror content 0:  2018-01-07 11:24:47.349390: Started mirror segment with content 0 and port 25435 at /Users/pchampion/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
+Segment mirror content 0:  2018-01-08 16:01:06.769486: Started mirror segment with content 0 and port 25435 at /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
 
-Force FTS probe scan:  2018-01-07 11:24:47.349674: Running command... psql postgres -c "SELECT gp_request_fts_probe_scan()"
+Force FTS probe scan:  2018-01-08 16:01:06.769688: Running command... psql postgres -c "SELECT gp_request_fts_probe_scan()"
 Force FTS probe scan:   gp_request_fts_probe_scan 
 Force FTS probe scan:  ---------------------------
 Force FTS probe scan:   t
 Force FTS probe scan:  (1 row)
 Force FTS probe scan:  
 Force FTS probe scan:  
-Force FTS probe scan:  2018-01-07 11:24:48.398303: FTS probe refreshed catalog
+Force FTS probe scan:  2018-01-08 16:01:07.836626: FTS probe refreshed catalog
 
-2018-01-07 11:24:48.398427: fetching cluster configuration
-2018-01-07 11:24:48.413256: fetched cluster configuration
+2018-01-08 16:01:07.836704: fetching cluster configuration
+2018-01-08 16:01:07.846714: fetched cluster configuration
 found 3 distinct content IDs
-:  2018-01-07 11:24:48.426700: Running command... psql postgres -c "select * from gp_segment_configuration order by content, dbid"
-:   dbid | content | role | preferred_role | mode | status | port  | hostname  |  address  | replication_port 
-:  ------+---------+------+----------------+------+--------+-------+-----------+-----------+------------------
-:      1 |      -1 | p    | p              | n    | u      | 15432 | pchampion | pchampion |                 
-:      8 |      -1 | m    | m              | s    | u      | 16432 | pchampion | pchampion |                 
-:      2 |       0 | p    | p              | s    | u      | 25432 | pchampion | pchampion |                 
-:      5 |       0 | m    | m              | s    | u      | 25435 | pchampion | pchampion |                 
-:      3 |       1 | p    | p              | s    | u      | 25433 | pchampion | pchampion |                 
-:      7 |       1 | m    | m              | s    | u      | 25436 | pchampion | pchampion |                 
-:      4 |       2 | p    | p              | s    | u      | 25434 | pchampion | pchampion |                 
-:      6 |       2 | m    | m              | s    | u      | 25437 | pchampion | pchampion |                 
+:  2018-01-08 16:01:07.859669: Running command... psql postgres -c "select * from gp_segment_configuration order by content, dbid"
+:   dbid | content | role | preferred_role | mode | status | port  |  hostname   |   address   |                                    datadir                                    
+:  ------+---------+------+----------------+------+--------+-------+-------------+-------------+-------------------------------------------------------------------------------
+:      1 |      -1 | p    | p              | n    | u      | 15432 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/qddir/demoDataDir-1
+:      8 |      -1 | m    | m              | s    | u      | 16432 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/standby
+:      2 |       0 | p    | p              | s    | u      | 25432 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast1/demoDataDir0
+:      5 |       0 | m    | m              | s    | u      | 25435 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror1/demoDataDir0
+:      3 |       1 | p    | p              | s    | u      | 25433 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast2/demoDataDir1
+:      6 |       1 | m    | m              | s    | u      | 25436 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror2/demoDataDir1
+:      4 |       2 | p    | p              | s    | u      | 25434 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast3/demoDataDir2
+:      7 |       2 | m    | m              | s    | u      | 25437 | xzhang-iMac | xzhang-iMac | /home/xzhang/workspace/gpdb/gpAux/gpdemo/datadirs/dbfast_mirror3/demoDataDir2
 :  (8 rows)
 :  
 :  
-:  2018-01-07 11:24:48.450190: 
+:  2018-01-08 16:01:07.873428: 
 
 
 -- end_ignore
