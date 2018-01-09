@@ -9,7 +9,7 @@ return subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True).replac
 CREATE
 
 -- stop a primary in order to trigger a mirror promotion
-select pg_ctl((select fselocation from gp_segment_configuration c, pg_filespace_entry f where c.role='p' and c.content=0 and c.dbid = f.fsedbid), 'stop', NULL, NULL);
+select pg_ctl((select datadir from gp_segment_configuration c where c.role='p' and c.content=0), 'stop', NULL, NULL);
 pg_ctl                                              
 ----------------------------------------------------
 waiting for server to shut down done
@@ -104,7 +104,7 @@ content|preferred_role|role|status|mode
 (2 rows)
 
 -- now, let's stop the new primary, so that we can restore original role
-select pg_ctl((select fselocation from gp_segment_configuration c, pg_filespace_entry f where c.role='p' and c.content=0 and c.dbid = f.fsedbid), 'stop', NULL, NULL);
+select pg_ctl((select datadir from gp_segment_configuration c where c.role='p' and c.content=0), 'stop', NULL, NULL);
 pg_ctl                                              
 ----------------------------------------------------
 waiting for server to shut down done

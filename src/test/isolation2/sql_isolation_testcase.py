@@ -140,6 +140,7 @@ class SQLIsolationExecutor(object):
                          "the database system is in recovery mode" in str(e)) and
                         retry > 1):
                         retry -= 1
+                        time.sleep(0.1)
                     else:
                         raise
             return con
