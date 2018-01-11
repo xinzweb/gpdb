@@ -462,14 +462,8 @@ probeWalRepUpdateConfig(int16 dbid, int16 segindex, char role,
 				 RelationGetRelationName(configrel));
 		}
 
-		char oldrole =
-			((Form_gp_segment_configuration) GETSTRUCT(configtuple))->role;
-
-		if (oldrole != role)
-		{
-			configvals[Anum_gp_segment_configuration_role-1] = CharGetDatum(role);
-			repls[Anum_gp_segment_configuration_role-1] = true;
-		}
+		configvals[Anum_gp_segment_configuration_role-1] = CharGetDatum(role);
+		repls[Anum_gp_segment_configuration_role-1] = true;
 
 		configvals[Anum_gp_segment_configuration_status-1] =
 			CharGetDatum(IsSegmentAlive ? GP_SEGMENT_CONFIGURATION_STATUS_UP :
