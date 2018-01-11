@@ -6947,16 +6947,15 @@ sigusr1_handler(SIGNAL_ARGS)
 	errno = save_errno;
 }
 
-/* XXX */
+/* GPDB_90_MERGE_FIXME: This function should be removed once hot standby code is merged */
 void SignalPromote(void)
 {
 	FILE *fd;
 	if ((fd = fopen(PROMOTE_SIGNAL_FILE, "w")))
 	{
-		/* XXX what if it fails? */
 		fclose(fd);
+		signal_child(StartupPID, SIGUSR2);
 	}
-	signal_child(StartupPID, SIGUSR2);
 }
 
 
