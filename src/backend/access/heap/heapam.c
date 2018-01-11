@@ -54,7 +54,6 @@
 #include "catalog/catalog.h"
 #include "catalog/namespace.h"
 #include "miscadmin.h"
-#include "postmaster/fts.h"
 #include "pgstat.h"
 #include "storage/bufmgr.h"
 #include "storage/freespace.h"
