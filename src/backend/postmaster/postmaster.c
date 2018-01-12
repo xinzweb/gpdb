@@ -6947,7 +6947,10 @@ sigusr1_handler(SIGNAL_ARGS)
 	errno = save_errno;
 }
 
-/* GPDB_90_MERGE_FIXME: This function should be removed once hot standby code is merged */
+/*
+ * GPDB_90_MERGE_FIXME: This function should be removed once hot
+ * standby can and will be enabled for mirrors.
+ */
 void SignalPromote(void)
 {
 	FILE *fd;
