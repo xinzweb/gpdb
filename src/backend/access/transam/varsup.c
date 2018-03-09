@@ -81,15 +81,10 @@ GetNewTransactionId(bool isSubXact, bool setProcXid)
 		 * To avoid swamping the postmaster with signals, we issue the
 		 * autovac request only once per 64K transaction starts.  This
 		 * still gives plenty of chances before we get into real trouble.
-		 *
-		 * if (IsUnderPostmaster && (xid % 65536) == 0)
-		 * {
-		 * 		elog(LOG, "GetNewTransactionId: requesting autovac (xid %u xidVacLimit %u)", xid, ShmemVariableCache->xidVacLimit);
-		 * 		SendPostmasterSignal(PMSIGNAL_START_AUTOVAC);
-		 * }
-		 *
-		 * MPP-19652: autovacuum disabled
 		 */
+		if (IsUnderPostmaster && (xid % 65536) == 0)
+			SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
+
 		if (IsUnderPostmaster &&
 		 TransactionIdFollowsOrEquals(xid, ShmemVariableCache->xidStopLimit))
 			ereport(ERROR,
@@ -302,14 +297,10 @@ SetTransactionIdLimit(TransactionId oldest_datfrozenxid,
 	 * assign hook (too many processes would try to execute the hook,
 	 * resulting in race conditions as well as crashes of those not connected
 	 * to shared memory).  Perhaps this can be improved someday.
-	 *
-	 * MPP-19652: autovacuum disabled
-	 * 
-	 *	xidVacLimit = oldest_datfrozenxid + autovacuum_freeze_max_age;
-	 *	if (xidVacLimit < FirstNormalTransactionId)
-	 *		xidVacLimit += FirstNormalTransactionId;
 	 */
-	xidVacLimit = xidWarnLimit;
+	xidVacLimit = oldest_datfrozenxid + autovacuum_freeze_max_age;
+	if (xidVacLimit < FirstNormalTransactionId)
+		xidVacLimit += FirstNormalTransactionId;
 
 	/* Grab lock for just long enough to set the new limit values */
 	LWLockAcquire(XidGenLock, LW_EXCLUSIVE);
@@ -333,9 +324,10 @@ SetTransactionIdLimit(TransactionId oldest_datfrozenxid,
 	 * database per invocation.  Once it's finished cleaning up the oldest
 	 * database, it'll call here, and we'll signal the postmaster to start
 	 * another iteration immediately if there are still any old databases.
-	 *
-	 * MPP-19652: autovacuum disabled
 	 */
+	if (TransactionIdFollowsOrEquals(curXid, xidVacLimit) &&
+		IsUnderPostmaster)
+		SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_LAUNCHER);
 
 	/* Give an immediate warning if past the wrap warn point */
 	if (TransactionIdFollowsOrEquals(curXid, xidWarnLimit))
