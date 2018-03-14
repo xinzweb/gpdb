@@ -13,10 +13,10 @@ select test_consume_xids(100 * 1000000);
 select test_consume_xids(100 * 1000000);
 select test_consume_xids(10 * 1000000);
 
--- Wait until autovacuum has processed template0. (But give up after 2 minutes)
+-- Wait until autovacuum has processed template0. (But give up after 20 seconds)
 do $$
 begin
-  for i in 1..120 loop
+  for i in 1..20 loop
     if (select age(datfrozenxid) < 200 * 1000000 from pg_database where datname='template0') then
       raise notice 'template0 is young again';
       return;

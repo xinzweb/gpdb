@@ -1933,7 +1933,7 @@ test_consume_xids(PG_FUNCTION_ARGS)
 	while (TransactionIdPrecedes(xid, targetxid))
 	{
 		elog(DEBUG1, "xid: %u", xid);
-		xid = GetNewTransactionId(true);
+		xid = GetNewTransactionId(true, true);
 	}
 
 	PG_RETURN_VOID();
