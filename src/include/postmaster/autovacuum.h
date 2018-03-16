@@ -38,6 +38,7 @@ extern int	Log_autovacuum_min_duration;
 extern bool AutoVacuumingActive(void);
 extern bool IsAutoVacuumLauncherProcess(void);
 extern bool IsAutoVacuumWorkerProcess(void);
+extern Oid GetAutoVacuumTemplate0DbId(void);
 
 /* Functions to start autovacuum process, called from postmaster */
 extern void autovac_init(void);

@@ -228,6 +228,7 @@ typedef enum
  *
  * av_signal		set by other processes to indicate various conditions
  * av_launcherpid	the PID of the autovacuum launcher
+ * av_template0dbid the DatabaseId for template0
  * av_freeWorkers	the WorkerInfo freelist
  * av_runningWorkers the WorkerInfo non-free queue
  * av_startingWorker pointer to WorkerInfo currently being started (cleared by
@@ -241,6 +242,7 @@ typedef struct
 {
 	sig_atomic_t av_signal[AutoVacNumSignals];
 	pid_t		av_launcherpid;
+	Oid         av_template0dbid;
 	SHMEM_OFFSET av_freeWorkers;
 	SHM_QUEUE	av_runningWorkers;
 	SHMEM_OFFSET av_startingWorker;
@@ -301,8 +303,6 @@ static void avl_sigusr1_handler(SIGNAL_ARGS);
 static void avl_sigterm_handler(SIGNAL_ARGS);
 static void avl_quickdie(SIGNAL_ARGS);
 static void autovac_refresh_stats(void);
-
-
 
 /********************************************************************
  *					  AUTOVACUUM LAUNCHER CODE
@@ -1617,8 +1617,8 @@ AutoVacWorkerMain(int argc, char *argv[])
 		InitPostgres(NULL, dbid, NULL, dbname);
 		SetProcessingMode(NormalProcessing);
 		set_ps_display(dbname, false);
-		ereport(DEBUG1,
-				(errmsg("autovacuum: processing database \"%s\"", dbname)));
+		ereport(LOG,
+				(errmsg("autovacuum: processing database %s", dbname)));
 
 		if (PostAuthDelay)
 			pg_usleep(PostAuthDelay * 1000000L);
@@ -1819,8 +1819,17 @@ get_database_list(void)
 		 * to do all VACUUMing manually, except for template0, which you cannot
 		 * VACUUM manually because you cannot connect to it.
 		 */
-		if (strcmp(thisname, "template0"))
+		if (!strcmp(thisname, TEMPLATE0_DATABASE_NAME))
+		{
+			/* Remember the template0 database id later for autovacuum worker
+			 * to use it. */
+			AutoVacuumShmem->av_template0dbid = db_id;
+		}
+		else
+		{
+			elog(LOG, "get_database_list skip database %s", thisname);
 			continue;
+		}
 
 		avdb = (avw_dbase *) palloc(sizeof(avw_dbase));
 
@@ -1860,6 +1869,7 @@ do_autovacuum(void)
 	PgStat_StatDBEntry *shared;
 	PgStat_StatDBEntry *dbentry;
 	BufferAccessStrategy bstrategy;
+	Oid        template0dbid = InvalidOid;
 
 	/*
 	 * StartTransactionCommand and CommitTransactionCommand will automatically
@@ -1939,6 +1949,10 @@ do_autovacuum(void)
 	 */
 	relScan = heap_beginscan(classRel, SnapshotNow, 0, NULL);
 
+	template0dbid = AutoVacuumShmem->av_template0dbid;
+
+	Assert(template0dbid != InvalidOid);
+
 	while ((tuple = heap_getnext(relScan, ForwardScanDirection)) != NULL)
 	{
 		Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
@@ -1961,6 +1975,18 @@ do_autovacuum(void)
 		 */
 		if (isAnyTempNamespace(classForm->relnamespace))
 			continue;
+
+		/*
+		 * GPDB: it's safe to skip the shared objects in template0 because it's
+		 * never updated after creation.
+		 */
+		if (MyDatabaseId == template0dbid &&
+			classForm->relisshared)
+		{
+			elog(LOG, "do_autovacuum: skip relation %s for database id %d",
+				 classForm->relname.data, MyDatabaseId);
+			continue;
+		}
 
 		relid = HeapTupleGetOid(tuple);
 
@@ -2788,6 +2814,11 @@ IsAutoVacuumWorkerProcess(void)
 	return am_autovacuum_worker;
 }
 
+Oid
+GetAutoVacuumTemplate0DbId(void)
+{
+	return AutoVacuumShmem->av_template0dbid;
+}
 
 /*
  * AutoVacuumShmemSize
@@ -2837,6 +2868,7 @@ AutoVacuumShmemInit(void)
 		AutoVacuumShmem->av_freeWorkers = INVALID_OFFSET;
 		SHMQueueInit(&AutoVacuumShmem->av_runningWorkers);
 		AutoVacuumShmem->av_startingWorker = INVALID_OFFSET;
+		AutoVacuumShmem->av_template0dbid = InvalidOid;
 
 		worker = (WorkerInfo) ((char *) AutoVacuumShmem +
 							   MAXALIGN(sizeof(AutoVacuumShmemStruct)));

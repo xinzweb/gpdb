@@ -1882,6 +1882,7 @@ vac_update_datfrozenxid(void)
 	HeapTuple	classTup;
 	TransactionId newFrozenXid;
 	bool		dirty = false;
+	Oid         template0dbid = InvalidOid;
 
 	/*
 	 * Initialize the "min" calculation with GetOldestXmin, which is a
@@ -1900,6 +1901,8 @@ vac_update_datfrozenxid(void)
 	scan = systable_beginscan(relation, InvalidOid, false,
 							  SnapshotNow, 0, NULL);
 
+	template0dbid = GetAutoVacuumTemplate0DbId();
+
 	while ((classTup = systable_getnext(scan)) != NULL)
 	{
 		Form_pg_class classForm = (Form_pg_class) GETSTRUCT(classTup);
@@ -1909,6 +1912,15 @@ vac_update_datfrozenxid(void)
 											classForm->relstorage))
 		{
 			Assert(!TransactionIdIsValid(classForm->relfrozenxid));
+			continue;
+		}
+
+		/* GPDB: skip shared object in template0 in order to bring down its
+		 * age */
+		if (MyDatabaseId == template0dbid && classForm->relisshared)
+		{
+			elog(LOG, "vac_update_datfrozenxid skipped relation %s for dbid %d",
+				 classForm->relname.data, MyDatabaseId);
 			continue;
 		}
 
