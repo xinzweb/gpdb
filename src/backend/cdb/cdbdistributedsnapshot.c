@@ -18,6 +18,7 @@
 #include "miscadmin.h"
 #include "access/transam.h"
 #include "cdb/cdbvars.h"
+#include "postmaster/autovacuum.h"
 #include "utils/tqual.h"
 
 /*
@@ -98,6 +99,29 @@ localXidSatisfiesAnyDistributedSnapshot(TransactionId localXid)
 					 (int) distributedSnapshotCommitted, localXid);
 				break;
 		}
+	}
+
+	/*
+	 * GPDB: autovacuum is enabled only for template0. If an autovacuum worker
+	 * vacuuming the tuples in the template0, we want to exclude the tuples from
+	 * distributed snapshot checking because there is no distributed snapshot
+	 * under utility mode.
+	 *
+	 * To prevent accidentally vacuum away any tuple required for a distributed
+	 * transaction, we only exclude local transactions within 1/2 of
+	 * autovacuum_freeze_max_age. Hence, autovacuum can reduce the template0
+	 * age without breaking any concurrent distributed transactions.
+	 */
+	if (Gp_role == GP_ROLE_UTILITY &&
+		 MyDatabaseId == GetAutoVacuumTemplate0DbId() &&
+		TransactionIdIsValid(ShmemVariableCache->xidVacLimit))
+	{
+		Oid newXid = localXid + autovacuum_freeze_max_age/2;
+		if (newXid < FirstNormalTransactionId)
+			newXid += FirstNormalTransactionId;
+
+		if (TransactionIdPrecedes(newXid, ShmemVariableCache->xidVacLimit))
+			return false;
 	}
 
 	/*
