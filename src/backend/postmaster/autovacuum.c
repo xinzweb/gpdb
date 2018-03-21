@@ -1871,6 +1871,13 @@ do_autovacuum(void)
 	BufferAccessStrategy bstrategy;
 	Oid        template0dbid = InvalidOid;
 
+	volatile bool isdebug = false;
+
+	while(isdebug)
+	{
+		pg_usleep(1000L);
+	}
+	
 	/*
 	 * StartTransactionCommand and CommitTransactionCommand will automatically
 	 * switch to other contexts.  We need this one to keep the list of
@@ -1983,8 +1990,8 @@ do_autovacuum(void)
 		if (MyDatabaseId == template0dbid &&
 			classForm->relisshared)
 		{
-			elog(LOG, "do_autovacuum: skip relation %s for database id %d",
-				 classForm->relname.data, MyDatabaseId);
+			elog(LOG, "do_autovacuum: skip relation %s for database id %d with relfrozenxid %u",
+				 classForm->relname.data, MyDatabaseId, classForm->relfrozenxid);
 			continue;
 		}
 

@@ -226,6 +226,9 @@ lazy_vacuum_rel(Relation onerel, VacuumStmt *vacstmt,
 	vacuum_set_xid_limits(vacstmt->freeze_min_age, onerel->rd_rel->relisshared,
 						  &OldestXmin, &FreezeLimit);
 
+	elog(LOG, "lazy_vacuum_rel: relname: %s OldestXmin: %u FreezeLimit: %u",
+		 onerel->rd_rel->relname.data, OldestXmin, FreezeLimit);
+
 	/*
 	 * Execute the various vacuum operations. Appendonly tables are treated
 	 * differently.

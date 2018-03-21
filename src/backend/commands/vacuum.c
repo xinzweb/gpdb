@@ -1626,6 +1626,7 @@ vacuum_set_xid_limits(int freeze_min_age, bool sharedRel,
 	int			freezemin;
 	TransactionId limit;
 	TransactionId safeLimit;
+	Oid template0dbid = GetAutoVacuumTemplate0DbId();
 
 	/*
 	 * We can always ignore processes running lazy vacuum.	This is because we
@@ -1638,6 +1639,15 @@ vacuum_set_xid_limits(int freeze_min_age, bool sharedRel,
 	 */
 	*oldestXmin = GetOldestXmin(sharedRel, true);
 
+	/*
+	 * GPDB: if template0, we always ignore other databases.
+	 */
+	if (MyDatabaseId == template0dbid)
+	{
+		*oldestXmin = GetOldestXmin(false, true);
+		elog(LOG, "vacuum_set_xid_limits: oldestXmin %u", *oldestXmin);
+	}
+	
 	Assert(TransactionIdIsNormal(*oldestXmin));
 
 	/*
@@ -1677,6 +1687,8 @@ vacuum_set_xid_limits(int freeze_min_age, bool sharedRel,
 	}
 
 	*freezeLimit = limit;
+	
+	elog(LOG, "vacuum_set_xid_limits: freezeLimit: %u", *freezeLimit);
 }
 
 void
@@ -1884,14 +1896,25 @@ vac_update_datfrozenxid(void)
 	bool		dirty = false;
 	Oid         template0dbid = InvalidOid;
 
+	template0dbid = GetAutoVacuumTemplate0DbId();
+
 	/*
 	 * Initialize the "min" calculation with GetOldestXmin, which is a
 	 * reasonable approximation to the minimum relfrozenxid for not-yet-
 	 * committed pg_class entries for new tables; see AddNewRelationTuple().
-	 * Se we cannot produce a wrong minimum by starting with this.
+	 * So we cannot produce a wrong minimum by starting with this.
+	 *
+	 * GPDB: template0 is read-only and autovacuum excludes shared objects,
+	 * hence, we only need to get the oldest xmin for the template0, instead of
+	 * all the databases.
 	 */
-	newFrozenXid = GetOldestXmin(true, true);
+	if (MyDatabaseId == template0dbid)
+		newFrozenXid = GetOldestXmin(false, true);
+	else
+		newFrozenXid = GetOldestXmin(true, true);
 
+	elog(LOG, "vac_update_datfrozenxid: newFrozenXid %u", newFrozenXid);
+	
 	/*
 	 * We must seqscan pg_class to find the minimum Xid, because there is no
 	 * index that can help us here.
@@ -1900,8 +1923,6 @@ vac_update_datfrozenxid(void)
 
 	scan = systable_beginscan(relation, InvalidOid, false,
 							  SnapshotNow, 0, NULL);
-
-	template0dbid = GetAutoVacuumTemplate0DbId();
 
 	while ((classTup = systable_getnext(scan)) != NULL)
 	{
@@ -1919,8 +1940,8 @@ vac_update_datfrozenxid(void)
 		 * age */
 		if (MyDatabaseId == template0dbid && classForm->relisshared)
 		{
-			elog(LOG, "vac_update_datfrozenxid skipped relation %s for dbid %d",
-				 classForm->relname.data, MyDatabaseId);
+			elog(LOG, "vac_update_datfrozenxid skipped relation %s for dbid %d, and current newFrozenXid is %u",
+				 classForm->relname.data, MyDatabaseId, newFrozenXid);
 			continue;
 		}
 
@@ -1928,6 +1949,9 @@ vac_update_datfrozenxid(void)
 
 		if (TransactionIdPrecedes(classForm->relfrozenxid, newFrozenXid))
 			newFrozenXid = classForm->relfrozenxid;
+		
+		elog(LOG, "vac_update_datfrozenxid relname: %s relfrozenxid: %u newFrozenXid %u",
+			 classForm->relname.data, classForm->relfrozenxid, newFrozenXid);
 	}
 
 	/* we're done with pg_class */
@@ -2582,6 +2606,9 @@ full_vacuum_rel(Relation onerel, VacuumStmt *vacstmt, List *updated_stats)
 
 	vacuum_set_xid_limits(vacstmt->freeze_min_age, onerel->rd_rel->relisshared,
 						  &OldestXmin, &FreezeLimit);
+
+	elog(LOG, "full_vacuum_rel relname: %s OldestXmin: %u FreezeLimit: %u",
+		 onerel->rd_rel->relname.data, OldestXmin, FreezeLimit);
 
 	/*
 	 * Flush any previous async-commit transactions.  This does not guarantee
