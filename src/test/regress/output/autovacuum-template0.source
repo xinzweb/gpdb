@@ -11,19 +11,8 @@ select age(datfrozenxid) < 200 * 1000000 from pg_database where datname='templat
  t
 (1 row)
 
-select test_consume_xids(100 * 1000000);
- test_consume_xids 
--------------------
- 
-(1 row)
-
-select test_consume_xids(100 * 1000000);
- test_consume_xids 
--------------------
- 
-(1 row)
-
-select test_consume_xids(10 * 1000000);
+-- Autovacuum is triggered after autovacuum_freeze_max_age and on 64K boundaries.
+select test_consume_xids(200 * 1000000 + 128 * 1024);
  test_consume_xids 
 -------------------
  
@@ -51,3 +40,11 @@ select age(datfrozenxid) > 200 * 1000000 from pg_database where datname=current_
  t
 (1 row)
 
+-- There is a limit 1 of billion transactions before database will error.
+-- Let's vacuum to clean up after ourselves to make future tests or multiple runs more reliable.
+\c regression;
+VACUUM;
+\c template1;
+VACUUM;
+\c postgres;
+VACUUM;
