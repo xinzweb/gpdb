@@ -1819,17 +1819,12 @@ get_database_list(void)
 		 * to do all VACUUMing manually, except for template0, which you cannot
 		 * VACUUM manually because you cannot connect to it.
 		 */
-		if (!strcmp(thisname, TEMPLATE0_DATABASE_NAME))
-		{
-			/* Remember the template0 database id later for autovacuum worker
-			 * to use it. */
-			AutoVacuumShmem->av_template0dbid = db_id;
-		}
-		else
-		{
-			elog(LOG, "get_database_list skip database %s", thisname);
+		if (strcmp(thisname, TEMPLATE0_DATABASE_NAME))
 			continue;
-		}
+
+		/* Remember the template0 database id later for autovacuum worker
+		 * to use it. */
+		AutoVacuumShmem->av_template0dbid = db_id;
 
 		avdb = (avw_dbase *) palloc(sizeof(avw_dbase));
 
@@ -1987,13 +1982,8 @@ do_autovacuum(void)
 		 * GPDB: it's safe to skip the shared objects in template0 because it's
 		 * never updated after creation.
 		 */
-		if (MyDatabaseId == template0dbid &&
-			classForm->relisshared)
-		{
-			elog(LOG, "do_autovacuum: skip relation %s for database id %d with relfrozenxid %u",
-				 classForm->relname.data, MyDatabaseId, classForm->relfrozenxid);
+		if (MyDatabaseId == template0dbid && classForm->relisshared)
 			continue;
-		}
 
 		relid = HeapTupleGetOid(tuple);
 

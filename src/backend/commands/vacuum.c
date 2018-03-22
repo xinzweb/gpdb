@@ -1939,11 +1939,7 @@ vac_update_datfrozenxid(void)
 		/* GPDB: skip shared object in template0 in order to bring down its
 		 * age */
 		if (MyDatabaseId == template0dbid && classForm->relisshared)
-		{
-			elog(LOG, "vac_update_datfrozenxid skipped relation %s for dbid %d, and current newFrozenXid is %u",
-				 classForm->relname.data, MyDatabaseId, newFrozenXid);
 			continue;
-		}
 
 		Assert(TransactionIdIsNormal(classForm->relfrozenxid));
 

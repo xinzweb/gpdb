@@ -107,22 +107,12 @@ localXidSatisfiesAnyDistributedSnapshot(TransactionId localXid)
 	 * distributed snapshot checking because there is no distributed snapshot
 	 * under utility mode.
 	 *
-	 * To prevent accidentally vacuum away any tuple required for a distributed
-	 * transaction, we only exclude local transactions within 1/2 of
-	 * autovacuum_freeze_max_age. Hence, autovacuum can reduce the template0
-	 * age without breaking any concurrent distributed transactions.
+	 * It's safe, because template0 is not connectable under distributed
+	 * transactions and can only be updated by autovacuum worker process in
+	 * utility mode.
 	 */
-	if (Gp_role == GP_ROLE_UTILITY &&
-		 MyDatabaseId == GetAutoVacuumTemplate0DbId() &&
-		TransactionIdIsValid(ShmemVariableCache->xidVacLimit))
-	{
-		Oid newXid = localXid + autovacuum_freeze_max_age/2;
-		if (newXid < FirstNormalTransactionId)
-			newXid += FirstNormalTransactionId;
-
-		if (TransactionIdPrecedes(newXid, ShmemVariableCache->xidVacLimit))
-			return false;
-	}
+	if (Gp_role == GP_ROLE_UTILITY && MyDatabaseId == GetAutoVacuumTemplate0DbId())
+		return false;
 
 	/*
 	 * If don't have distributed snapshot to check, return it can be seen and

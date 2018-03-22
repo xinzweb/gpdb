@@ -12,7 +12,13 @@ select age(datfrozenxid) < 200 * 1000000 from pg_database where datname='templat
 (1 row)
 
 -- Autovacuum is triggered after autovacuum_freeze_max_age and on 64K boundaries.
-select test_consume_xids(200 * 1000000 + 128 * 1024);
+select test_consume_xids(200 * 1000000);
+ test_consume_xids 
+-------------------
+ 
+(1 row)
+
+select test_consume_xids(128 * 1024);
  test_consume_xids 
 -------------------
  

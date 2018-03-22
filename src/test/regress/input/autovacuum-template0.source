@@ -10,7 +10,15 @@ set debug_burn_xids=on;
 select age(datfrozenxid) < 200 * 1000000 from pg_database where datname='template0';
 
 -- Autovacuum is triggered after autovacuum_freeze_max_age and on 64K boundaries.
-select test_consume_xids(200 * 1000000 + 128 * 1024);
+select test_consume_xids(200 * 1000000);
+-- start_ignore
+
+select txid_current();
+-- force the ShmemVariableCache->latestCompleteXid to be refreshed.
+\! psql regression -c 'select txid_current()'
+
+-- end_ignore
+select test_consume_xids(128 * 1024);
 
 -- start_ignore
 select age(datfrozenxid), datname from pg_database;
@@ -48,3 +56,8 @@ VACUUM;
 VACUUM;
 \c postgres;
 VACUUM;
+
+-- start_ignore
+select age(datfrozenxid), datname from pg_database;
+select now();
+-- end_ignore
