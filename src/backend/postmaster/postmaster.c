@@ -6457,6 +6457,7 @@ static void
 BackendInitialize(Port *port)
 {
 	int			status;
+	int			ret;
 	char		remote_host[NI_MAXHOST];
 	char		remote_port[NI_MAXSERV];
 	char		remote_ps_data[NI_MAXHOST];
@@ -6527,17 +6528,11 @@ BackendInitialize(Port *port)
 	 */
 	remote_host[0] = '\0';
 	remote_port[0] = '\0';
-	if (pg_getnameinfo_all(&port->raddr.addr, port->raddr.salen,
+	if ((ret = pg_getnameinfo_all(&port->raddr.addr, port->raddr.salen,
 						   remote_host, sizeof(remote_host),
 						   remote_port, sizeof(remote_port),
-					   (log_hostname ? 0 : NI_NUMERICHOST) | NI_NUMERICSERV))
+					   (log_hostname ? 0 : NI_NUMERICHOST) | NI_NUMERICSERV)) != 0)
 	{
-		int			ret = pg_getnameinfo_all(&port->raddr.addr, port->raddr.salen,
-											 remote_host, sizeof(remote_host),
-											 remote_port, sizeof(remote_port),
-											 NI_NUMERICHOST | NI_NUMERICSERV);
-
-		if (ret)
 			ereport(WARNING,
 					(errmsg_internal("pg_getnameinfo_all() failed: %s",
 									 gai_strerror(ret))));
