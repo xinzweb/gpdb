@@ -47,7 +47,7 @@
 
 /* table_functions test */
 extern Datum multiset_example(PG_FUNCTION_ARGS);
-extern Datum multiset_scalar_null(PG_FUNCTION_ARGS);
+extern Datum hackday2018_hello(PG_FUNCTION_ARGS);
 extern Datum multiset_scalar_value(PG_FUNCTION_ARGS);
 extern Datum multiset_scalar_tuple(PG_FUNCTION_ARGS);
 extern Datum multiset_setof_null(PG_FUNCTION_ARGS);
@@ -113,11 +113,11 @@ static EPlan *find_plan(char *ident, EPlan ** eplan, int *nplans);
 
 
 
-PG_FUNCTION_INFO_V1(multiset_scalar_null);
+PG_FUNCTION_INFO_V1(hackday2018_hello);
 Datum
-multiset_scalar_null(PG_FUNCTION_ARGS)
+hackday2018_hello(PG_FUNCTION_ARGS)
 {
-	PG_RETURN_NULL();
+	PG_RETURN_DATUM(CStringGetTextDatum("Hello Hackday2018 all"));
 }
 
 PG_FUNCTION_INFO_V1(multiset_scalar_value);
