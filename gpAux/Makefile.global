@@ -98,6 +98,7 @@ sol10_sparc_32_PYTHONHOME=/opt/python32-2.5.1
 suse10_x86_64_PYTHONHOME=$(BLD_THIRDPARTY_DIR)/python-2.7.12
 suse11_x86_64_PYTHONHOME=$(BLD_THIRDPARTY_DIR)/python-2.7.12
 sles11_x86_64_PYTHONHOME=$(BLD_THIRDPARTY_DIR)/python-2.7.12
+ubuntu16_x86_64_PYTHONHOME=/usr/local/lib/python2.7/dist-packages
 ifneq "$($(BLD_ARCH)_PYTHONHOME)" ""
 export PYTHONHOME=$($(BLD_ARCH)_PYTHONHOME)
 endif

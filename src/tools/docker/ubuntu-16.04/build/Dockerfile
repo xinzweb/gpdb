@@ -18,5 +18,4 @@ RUN mkdir -p /root/gpdb/gpAux/docs/release
 ENV BLD_ARCH=ubuntu16_x86_64
 
 WORKDIR /root/gpdb/gpAux
-RUN make sync_tools
-RUN make dist
+RUN make GPROOT=/usr/local PARALLEL_MAKE_OPTS=-j8 -s dist
