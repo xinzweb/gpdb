@@ -9,6 +9,7 @@
       <conf name="sles11_x86_64"  visibility="public"/>
       <conf name="win32"          visibility="public"/>
       <conf name="aix7_ppc_64"    visibility="public"/>
+      <conf name="ubuntu16_x86_64" visibility="public"/>
     </configurations>
 
     <dependencies>
