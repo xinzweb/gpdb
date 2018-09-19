@@ -31,3 +31,6 @@ copydocs: Dockerfile_copydocs
 copylibs: Dockerfile_copylibs
 	docker build --tag ubuntu_ent_build:16.04_copylibs --file Dockerfile_copylibs $(BUILD_ROOT)
 
+.PHONY: clients
+clients: Dockerfile_clients
+	docker build --tag ubuntu_ent_build:16.04_clients --file Dockerfile_clients $(BUILD_ROOT)
