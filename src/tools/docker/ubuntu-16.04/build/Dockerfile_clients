@@ -9,5 +9,6 @@ ENV INSTLOC=/usr/local/greenplum-db-devel
 ENV CLIENTINSTLOC=${INSTLOC}/greenplum-clients
 ENV GPROOT=/usr/local
 ENV BUILDDIR=/root/gpdb
+ENV ADDON_DIR=addon
 
 RUN BLD_TARGETS="clients" make clients INSTLOC=${INSTLOC} CLIENTINSTLOC=${CLIENTINSTLOC}
