@@ -1,0 +1,5 @@
+FROM pivotaldata/ubuntu-gpdb-dev:16.04_gcc_6_3
+
+RUN apt-get update
+# required for `make mkpgbouncer`
+RUN apt-get install -y libldap2-dev libtool automake pkg-config

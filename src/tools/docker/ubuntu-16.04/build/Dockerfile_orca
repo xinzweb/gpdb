@@ -1,0 +1,8 @@
+FROM ubuntu_ent_build:16.04_apt
+
+RUN mkdir /root/gpdb/
+COPY . /root/gpdb/
+
+WORKDIR /root/gpdb/depends
+RUN ./configure
+RUN make

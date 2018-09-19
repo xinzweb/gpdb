@@ -334,6 +334,9 @@ BLD_GPDB_BUILDSET=$($(BLD_ARCH)_GPDB_BUILDSET)
 define BUILD_STEPS
 	@rm -rf $(INSTLOC)
 	cd $(BUILDDIR) && $(MAKE) $(PARALLEL_MAKE_OPTS) install
+endef
+
+define OTHER_STEPS
 	#@$(MAKE) greenplum_path INSTLOC=$(INSTLOC)
 	#@$(MAKE) mgmtcopy INSTLOC=$(INSTLOC)
 	@$(MAKE) mkpgbouncer INSTLOC=$(INSTLOC) BUILDDIR=$(BUILDDIR)

@@ -1,12 +1,33 @@
 BUILD_ROOT=../../../../../
 
-.PHONY: docker
-docker: docker-image
+.PHONY: build
+build: dist
 
-# VPN is required for enterprise build to work
-docker-image: Dockerfile
-	docker build --add-host releng.sanmateo.greenplum.com:10.110.112.79 --iidfile docker-image --tag ubuntu_ent_build:16.04 --file Dockerfile $(BUILD_ROOT)
+.PHONY: apt
+apt: Dockerfile_apt
+	docker build --tag ubuntu_ent_build:16.04_apt --file Dockerfile_apt $(BUILD_ROOT)
 
-.PHONY: debug-build
-debug-build:
-	docker run -it --net host --rm -v $$PWD/$(BUILD_ROOT):/root/gpdb pivotaldata/ubuntu-gpdb-dev:16.04_gcc_6_3 bash
+.PHONY: orca
+orca: Dockerfile_orca
+	docker build --tag ubuntu_ent_build:16.04_orca --file Dockerfile_orca $(BUILD_ROOT)
+
+.PHONY: dist
+dist: Dockerfile_dist
+	docker build --tag ubuntu_ent_build:16.04_dist --file Dockerfile_dist $(BUILD_ROOT)
+
+.PHONY: mkpgbouncer
+mkpgbouncer: Dockerfile_mkpgbouncer
+	docker build --tag ubuntu_ent_build:16.04_mkpgbouncer --file Dockerfile_mkpgbouncer $(BUILD_ROOT)
+
+.PHONY: mkpgbench
+mkpgbench: Dockerfile_mkpgbench
+	docker build --tag ubuntu_ent_build:16.04_mkpgbench --file Dockerfile_mkpgbench $(BUILD_ROOT)
+
+.PHONY: copydocs
+copydocs: Dockerfile_copydocs
+	docker build --tag ubuntu_ent_build:16.04_copydocs --file Dockerfile_copydocs $(BUILD_ROOT)
+
+.PHONY: copylibs
+copylibs: Dockerfile_copylibs
+	docker build --tag ubuntu_ent_build:16.04_copylibs --file Dockerfile_copylibs $(BUILD_ROOT)
+
