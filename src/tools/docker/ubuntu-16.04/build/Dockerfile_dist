@@ -2,15 +2,26 @@ FROM ubuntu_ent_build:16.04_orca
 
 COPY . /root/gpdb/
 
-RUN git submodule update --init --recursive
-
-WORKDIR /root/gpdb/gpAux
-
+# copy the ORCA dependency for build
 ENV BLD_ARCH=ubuntu16_x86_64
+ENV BUILDDIR=/root/gpdb
+
+WORKDIR ${BUILDDIR}/depends
+
+# as if we are doing `make sync_tools` to put ORCA headers and libs to proper directory
+# later can be found by the `make dist`
+RUN mkdir -p ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/ && \
+    cp -r build/lib/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/ && \
+    cp -r build/include/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/
+
+WORKDIR ${BUILDDIR}/gpAux
+
 ENV INSTLOC=/usr/local/greenplum-db-devel
 ENV GPROOT=/usr/local
-ENV BUILDDIR=/root/gpdb
 ENV ADDON_DIR=addon
 
 RUN rm -rf ${INSTLOC}
 RUN make PARALLEL_MAKE_OPTS=-j8 -s dist
+
+# copy the ORCA dependency for runtime
+RUN cp ${BUILDDIR}/depends/build/lib/lib* ${INSTLOC}/lib/

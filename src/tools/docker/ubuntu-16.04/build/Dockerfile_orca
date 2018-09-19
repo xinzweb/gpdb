@@ -4,5 +4,6 @@ RUN mkdir /root/gpdb/
 COPY . /root/gpdb/
 
 WORKDIR /root/gpdb/depends
-RUN ./configure
-RUN make
+RUN ./configure && \
+    make && \
+    make install

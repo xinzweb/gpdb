@@ -1,4 +1,4 @@
-BUILD_ROOT=../../../../../
+BUILD_ROOT=../../../../..
 
 .PHONY: build
 build: dist
@@ -12,8 +12,17 @@ orca: Dockerfile_orca
 	docker build --tag ubuntu_ent_build:16.04_orca --file Dockerfile_orca $(BUILD_ROOT)
 
 .PHONY: dist
-dist: Dockerfile_dist
+dist: Dockerfile_dist $(BUILD_ROOT)/gpAux/addon
+	cd $(BUILD_ROOT) && git submodule update --init --recursive
 	docker build --tag ubuntu_ent_build:16.04_dist --file Dockerfile_dist $(BUILD_ROOT)
+
+.PHONY: check
+check: Dockerfile_check
+	docker build --no-cache --tag ubuntu_ent_build:16.04_check --file Dockerfile_check .
+	docker run ubuntu_ent_build:16.04_check
+
+$(BUILD_ROOT)/gpAux/addon:
+	cd $(BUILD_ROOT)/gpAux && git clone git@github.com:greenplum-db/gpaddon.git addon
 
 .PHONY: mkpgbouncer
 mkpgbouncer: Dockerfile_mkpgbouncer
@@ -35,6 +44,6 @@ copylibs: Dockerfile_copylibs
 clients: Dockerfile_clients
 	docker build --tag ubuntu_ent_build:16.04_clients --file Dockerfile_clients $(BUILD_ROOT)
 
-.PHONY: loaders
-loaders: Dockerfile_loaders
-	docker build --tag ubuntu_ent_build:16.04_loaders --file Dockerfile_loaders $(BUILD_ROOT)
+.PHONY: debug
+debug:
+	docker run -it --rm $$(docker images -q | head -n 1) bash
