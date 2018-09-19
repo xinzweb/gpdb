@@ -34,3 +34,7 @@ copylibs: Dockerfile_copylibs
 .PHONY: clients
 clients: Dockerfile_clients
 	docker build --tag ubuntu_ent_build:16.04_clients --file Dockerfile_clients $(BUILD_ROOT)
+
+.PHONY: loaders
+loaders: Dockerfile_loaders
+	docker build --tag ubuntu_ent_build:16.04_loaders --file Dockerfile_loaders $(BUILD_ROOT)
