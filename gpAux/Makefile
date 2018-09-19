@@ -119,7 +119,7 @@ SERVER_PLATFORMS=rhel5_x86_32 rhel5_x86_64 rhel7_x86_64 rhel6_x86_64 suse10_x86_
 ## Support gppkg platforms
 ##
 
-GPPKG_PLATFORMS=rhel5_x86_64 rhel7_x86_64 rhel6_x86_64 suse10_x86_64 suse11_x86_64 sles11_x86_64
+GPPKG_PLATFORMS=rhel5_x86_64 rhel7_x86_64 rhel6_x86_64 suse10_x86_64 suse11_x86_64 sles11_x86_64 ubuntu_xenial_x86_64
 
 #---------------------------------------------------------------------
 # Compiler options

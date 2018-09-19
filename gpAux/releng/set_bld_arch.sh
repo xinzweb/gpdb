@@ -25,6 +25,10 @@ case "`uname -s`" in
             ;;
         esac
     fi
+    if [ -f /etc/lsb-release ]; then
+       UBUNTU_CODENAME=$(</etc/lsb-release awk -F "=" '$1=="DISTRIB_CODENAME" { print $2 }')
+       BLD_ARCH_HOST=ubuntu_${UBUNTU_CODENAME}_x86_64
+    fi
     ;;
 
     SunOS)
