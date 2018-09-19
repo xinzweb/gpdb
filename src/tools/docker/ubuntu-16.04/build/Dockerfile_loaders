@@ -1,7 +1,5 @@
 FROM ubuntu_ent_build:16.04_clients
 
-COPY . /root/gpdb/
-
 WORKDIR /root/gpdb/gpAux
 
 ENV BLD_ARCH=ubuntu16_x86_64
@@ -10,6 +8,22 @@ ENV CLIENTINSTLOC=${INSTLOC}/greenplum-clients
 ENV GPROOT=/usr/local
 ENV BUILDDIR=/root/gpdb
 ENV LOADERSINSTLOC=${INSTLOC}/greenplum-loaders
+
+# We copy both symlinks and its target if they are under the same
+# directory.
+# If the symlink redirected to different directory, we dereference
+# and only copy the target over.
+RUN cp -L /usr/lib/x86_64-linux-gnu/libcrypto.so ${INSTLOC}/lib/; \
+    cp /lib/x86_64-linux-gnu/libssl.so.1.0.0 ${INSTLOC}/lib/; \
+    ln -s libssl.so.1.0.0 ${INSTLOC}/lib/libssl.so; \
+    cp -L /usr/lib/x86_64-linux-gnu/libkrb5.so ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libcom_err.so ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libk5crypto.so ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libkrb5support.so ${INSTLOC}/lib/; \
+    cp /usr/lib/x86_64-linux-gnu/liblber.so* ${INSTLOC}/lib/; \
+    cp /usr/lib/x86_64-linux-gnu/libldap_r*so* ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so ${INSTLOC}/lib/; \
+    cp /usr/lib/x86_64-linux-gnu/libyaml*so* ${INSTLOC}/lib/;
 
 RUN make set_scripts_version INSTLOC=${INSTLOC} && \
     BLD_TARGETS="loaders" make loaders  INSTLOC=${INSTLOC} LOADERSINSTLOC=${LOADERSINSTLOC}

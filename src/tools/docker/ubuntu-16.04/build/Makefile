@@ -46,7 +46,7 @@ clients: Dockerfile_clients
 
 .PHONY: loaders
 loaders: Dockerfile_loaders
-	docker build --tag ubuntu_ent_build:16.04_loaders --file Dockerfile_loaders $(BUILD_ROOT)
+	docker build --tag ubuntu_ent_build:16.04_loaders --file Dockerfile_loaders .
 
 .PHONY: debug
 debug:
