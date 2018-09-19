@@ -48,6 +48,10 @@ clients: Dockerfile_clients
 loaders: Dockerfile_loaders
 	docker build --tag ubuntu_ent_build:16.04_loaders --file Dockerfile_loaders .
 
+.PHONY: copylicense
+copylicense: Dockerfile_copylicense
+	docker build --tag ubuntu_ent_build:16.04_copylicense --file Dockerfile_copylicense .
+
 .PHONY: debug
 debug:
 	docker run -it --rm $$(docker images -q | head -n 1) bash

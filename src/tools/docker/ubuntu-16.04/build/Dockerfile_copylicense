@@ -1,0 +1,9 @@
+FROM ubuntu_ent_build:16.04_loaders
+
+WORKDIR /root/gpdb/gpAux
+
+RUN make set_scripts_version INSTLOC=${LOADERSINSTLOC} && \
+    make set_scripts_version INSTLOC=${CLIENTINSTLOC} && \
+    make copylicense INSTLOC=${INSTLOC} \
+                             CLIENTINSTLOC=${CLIENTINSTLOC} \
+                             LOADERSINSTLOC=${LOADERSINSTLOC}
