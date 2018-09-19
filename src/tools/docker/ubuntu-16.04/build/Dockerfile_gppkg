@@ -1,0 +1,7 @@
+FROM ubuntu_ent_build:16.04_copylicense
+
+COPY . /root/gpdb
+
+WORKDIR /root/gpdb/gpAux
+
+RUN BLD_TARGETS="gppkg" make gppkg INSTLOC=${INSTLOC} GPPKGINSTLOC=${GPPKGINSTLOC}

@@ -52,6 +52,10 @@ loaders: Dockerfile_loaders
 copylicense: Dockerfile_copylicense
 	docker build --tag ubuntu_ent_build:16.04_copylicense --file Dockerfile_copylicense .
 
+.PHONY: gppkg
+gppkg: Dockerfile_gppkg
+	docker build --tag ubuntu_ent_build:16.04_gppkg --file Dockerfile_gppkg ${BUILD_ROOT}
+
 .PHONY: debug
 debug:
 	docker run -it --rm $$(docker images -q | head -n 1) bash
