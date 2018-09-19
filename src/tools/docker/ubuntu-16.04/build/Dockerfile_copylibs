@@ -9,4 +9,23 @@ ENV INSTLOC=/usr/local/greenplum-db-devel
 ENV GPROOT=/usr/local
 ENV BUILDDIR=/root/gpdb
 
+RUN cp -r /usr/include/curl/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/include/curl/
+
+RUN mkdir -p /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
+RUN cp /usr/bin/openssl /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
+
+RUN mkdir -p /root/gpdb/gpAux/ext/${BLD_ARCH}/ssl/
+RUN cp -r /usr/include/openssl/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/include/openssl/
+RUN cp -r /usr/lib/ssl/openssl.cnf ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/ssl/
+
+# build the gimli locally
+ADD https://bitbucket.org/wez/gimli/get/e9f4b852359e.zip /gimli/gimli.zip
+WORKDIR /gimli
+RUN unzip ./gimli.zip
+WORKDIR /gimli/wez-gimli-e9f4b852359e
+RUN ./autogen.sh && ./configure --enable-static --disable-shared && make -j8 install
+
+RUN cp /usr/local/bin/glider /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
+
+WORKDIR /root/gpdb/gpAux
 RUN make copylibs INSTLOC=${INSTLOC}
