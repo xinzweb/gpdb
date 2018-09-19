@@ -4,9 +4,4 @@ COPY . /root/gpdb/
 
 WORKDIR /root/gpdb/gpAux
 
-ENV BLD_ARCH=ubuntu16_x86_64
-ENV INSTLOC=/usr/local/greenplum-db-devel
-ENV GPROOT=/usr/local
-ENV BUILDDIR=/root/gpdb
-
 RUN make mkpgbench INSTLOC=${INSTLOC} BUILDDIR=${BUILDDIR}

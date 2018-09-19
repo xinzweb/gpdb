@@ -1,14 +1,9 @@
-FROM ubuntu_ent_build:16.04_copydocs
+FROM ubuntu_ent_build:16.04_copylibs
 
 COPY . /root/gpdb/
 
 WORKDIR /root/gpdb/gpAux
 
-ENV BLD_ARCH=ubuntu16_x86_64
-ENV INSTLOC=/usr/local/greenplum-db-devel
 ENV CLIENTINSTLOC=${INSTLOC}/greenplum-clients
-ENV GPROOT=/usr/local
-ENV BUILDDIR=/root/gpdb
-ENV ADDON_DIR=addon
 
 RUN BLD_TARGETS="clients" make clients INSTLOC=${INSTLOC} CLIENTINSTLOC=${CLIENTINSTLOC}

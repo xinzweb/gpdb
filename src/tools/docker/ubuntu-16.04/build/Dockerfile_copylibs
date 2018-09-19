@@ -4,11 +4,6 @@ COPY . /root/gpdb/
 
 WORKDIR /root/gpdb/gpAux
 
-ENV BLD_ARCH=ubuntu16_x86_64
-ENV INSTLOC=/usr/local/greenplum-db-devel
-ENV GPROOT=/usr/local
-ENV BUILDDIR=/root/gpdb
-
 RUN cp -r /usr/include/curl/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/include/curl/
 
 RUN mkdir -p /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
