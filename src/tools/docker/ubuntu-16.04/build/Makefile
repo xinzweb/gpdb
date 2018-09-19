@@ -12,7 +12,7 @@ orca: Dockerfile_orca
 	docker build --tag ubuntu_ent_build:16.04_orca --file Dockerfile_orca $(BUILD_ROOT)
 
 .PHONY: dist
-dist: Dockerfile_dist $(BUILD_ROOT)/gpAux/addon
+dist: Dockerfile_dist $(BUILD_ROOT)/gpAux/addon/README
 	cd $(BUILD_ROOT) && git submodule update --init --recursive
 	docker build --tag ubuntu_ent_build:16.04_dist --file Dockerfile_dist $(BUILD_ROOT)
 
@@ -21,7 +21,7 @@ check: Dockerfile_check
 	docker build --no-cache --tag ubuntu_ent_build:16.04_check --file Dockerfile_check .
 	docker run ubuntu_ent_build:16.04_check
 
-$(BUILD_ROOT)/gpAux/addon:
+$(BUILD_ROOT)/gpAux/addon/README:
 	cd $(BUILD_ROOT)/gpAux && git clone git@github.com:greenplum-db/gpaddon.git addon
 
 .PHONY: mkpgbouncer

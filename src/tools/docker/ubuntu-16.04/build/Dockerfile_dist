@@ -21,7 +21,7 @@ ENV GPROOT=/usr/local
 ENV ADDON_DIR=addon
 
 RUN rm -rf ${INSTLOC}
-RUN make PARALLEL_MAKE_OPTS=-j8 -s dist
+RUN make PARALLEL_MAKE_OPTS=-j8 -s distclean dist
 
 # copy the ORCA dependency for runtime
 RUN cp ${BUILDDIR}/depends/build/lib/lib* ${INSTLOC}/lib/
