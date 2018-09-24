@@ -23,6 +23,15 @@ ENV ADDON_DIR=addon
 RUN rm -rf ${INSTLOC}
 
 #############################
+# required by `apr-1-config` and `curl-config`
+#############################
+ARG BLD_THIRDPARTY_BIN_DIR=${BUILDDIR}/gpAux/ext/${BLD_ARCH}/bin/
+
+RUN mkdir -p ${BLD_THIRDPARTY_BIN_DIR} && \
+    cp /usr/bin/apr-1-config ${BLD_THIRDPARTY_BIN_DIR} && \
+    cp /usr/bin/curl-config ${BLD_THIRDPARTY_BIN_DIR}
+
+#############################
 # required by `make copydocs`
 #############################
 RUN mkdir -p /root/gpdb/gpAux/docs/release
