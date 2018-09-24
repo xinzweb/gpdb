@@ -1,7 +1,13 @@
 FROM ubuntu_ent_build:16.04_copylicense
 
-COPY . /root/gpdb
+# dependency of `rpmbuild`
+RUN apt-get install -y rpm
+
+COPY ext/ /opt/releng/ext/
 
 WORKDIR /root/gpdb/gpAux
+
+# dependency of DD boost. Share same .so with RHEL5
+RUN cp /opt/releng/ext/rhel5_x86_64/lib/libDDBoost.so /root/gpdb/gpAux/ext/ubuntu_xenial_x86_64/lib/
 
 RUN BLD_TARGETS="gppkg" make gppkg INSTLOC=${INSTLOC} GPPKGINSTLOC=${GPPKGINSTLOC}
