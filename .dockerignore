@@ -1,2 +1,6 @@
 .git
 src/test/tinc/
+gpAux/gpdemo/datadirs/
+*/*/*.o
+gpMgmt/test/
+depends/build/

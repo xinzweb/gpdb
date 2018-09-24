@@ -21,7 +21,62 @@ ENV GPROOT=/usr/local
 ENV ADDON_DIR=addon
 
 RUN rm -rf ${INSTLOC}
+
+#############################
+# required by `make copydocs`
+#############################
+RUN mkdir -p /root/gpdb/gpAux/docs/release
+
+#############################
+# required by `make copylibs`
+#############################
+RUN cp -r /usr/include/curl/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/include/curl/
+
+RUN mkdir -p /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
+RUN cp /usr/bin/openssl /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
+
+RUN mkdir -p /root/gpdb/gpAux/ext/${BLD_ARCH}/ssl/
+RUN cp -r /usr/include/openssl/ ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/include/openssl/
+RUN cp -r /usr/lib/ssl/openssl.cnf ${BUILDDIR}/gpAux/ext/${BLD_ARCH}/ssl/
+
+# build the gimli locally
+ADD https://bitbucket.org/wez/gimli/get/e9f4b852359e.zip /gimli/gimli.zip
+WORKDIR /gimli
+RUN unzip ./gimli.zip
+WORKDIR /gimli/wez-gimli-e9f4b852359e
+RUN ./autogen.sh && ./configure --enable-static --disable-shared && make -j8 install
+
+RUN cp /usr/local/bin/glider /root/gpdb/gpAux/ext/${BLD_ARCH}/bin/
+
+#############################
+# required by `make clients`
+#############################
+ENV CLIENTINSTLOC=${INSTLOC}/greenplum-clients
+
+
+WORKDIR /root/gpdb/gpAux
 RUN make PARALLEL_MAKE_OPTS=-j8 -s distclean dist
 
 # copy the ORCA dependency for runtime
 RUN cp ${BUILDDIR}/depends/build/lib/lib* ${INSTLOC}/lib/
+
+#############################
+# required by `make loaders`
+#############################
+ENV LOADERSINSTLOC=${INSTLOC}/greenplum-loaders
+
+# We copy both symlinks and its target if they are under the same
+# directory.
+# If the symlink redirected to different directory, we dereference
+# and only copy the target over.
+RUN cp -L /usr/lib/x86_64-linux-gnu/libcrypto.so ${INSTLOC}/lib/; \
+    cp /lib/x86_64-linux-gnu/libssl.so.1.0.0 ${INSTLOC}/lib/; \
+    ln -s libssl.so.1.0.0 ${INSTLOC}/lib/libssl.so; \
+    cp -L /usr/lib/x86_64-linux-gnu/libkrb5.so ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libcom_err.so ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libk5crypto.so ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libkrb5support.so ${INSTLOC}/lib/; \
+    cp /usr/lib/x86_64-linux-gnu/liblber.so* ${INSTLOC}/lib/; \
+    cp /usr/lib/x86_64-linux-gnu/libldap_r*so* ${INSTLOC}/lib/; \
+    cp -L /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so ${INSTLOC}/lib/; \
+    cp /usr/lib/x86_64-linux-gnu/libyaml*so* ${INSTLOC}/lib/;
