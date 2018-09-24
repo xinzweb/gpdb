@@ -60,8 +60,7 @@ ext/rhel5_x86_64:
 	mkdir -p ext/
 	# require ivyrepo information and VPN
 	./ivy.bash
-	tar xzvf DDBoostSDK-rhel5_x86_64-3.3.0.4-550644.targz
-	mv rhel5_x86_64/ ext/
+	mv /tmp/rhel5_x86_64/ ext/
 
 .PHONY: debug
 debug:
