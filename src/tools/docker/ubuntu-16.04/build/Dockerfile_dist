@@ -23,7 +23,7 @@ ENV ADDON_DIR=addon
 RUN rm -rf ${INSTLOC}
 
 #############################
-# required by `apr-1-config` and `curl-config`
+# required by `apr-1-config` and `curl-config` in `gpfdist`
 #############################
 ARG BLD_THIRDPARTY_BIN_DIR=${BUILDDIR}/gpAux/ext/${BLD_ARCH}/bin/
 

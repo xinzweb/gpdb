@@ -19,7 +19,7 @@ dist: Dockerfile_dist $(BUILD_ROOT)/gpAux/addon/README
 .PHONY: check
 check: Dockerfile_check
 	docker build --no-cache --tag ubuntu_ent_build:16.04_check --file Dockerfile_check .
-	docker run ubuntu_ent_build:16.04_check
+	docker run -t ubuntu_ent_build:16.04_check
 
 $(BUILD_ROOT)/gpAux/addon/README:
 	cd $(BUILD_ROOT)/gpAux && git clone git@github.com:greenplum-db/gpaddon.git addon
