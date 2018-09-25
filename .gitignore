@@ -45,9 +45,11 @@ build.sh
 .project
 .settings/
 .vscode/
+.idea/
 GPATH
 GRTAGS
 GTAGS
+gpAux/addon/
 
 # Local excludes in root directory
 /GNUmakefile
