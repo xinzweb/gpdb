@@ -45,6 +45,7 @@ groups:
   - compile_gpdb_centos7
   - compile_gpdb_sles11
   - compile_gpdb_ubuntu16
+  - compile_gpdb_ubuntu16_oss
   - compile_gpdb_open_source_centos6
   - compile_gpdb_binary_swap_centos6
   - compile_gpdb_windows_cl
@@ -167,6 +168,7 @@ groups:
   - compile_gpdb_centos7
   - compile_gpdb_sles11
   - compile_gpdb_ubuntu16
+  - compile_gpdb_ubuntu16_oss
   - compile_gpdb_open_source_centos6
   - compile_gpdb_binary_swap_centos6
   - compile_gpdb_windows_cl
@@ -423,6 +425,12 @@ resources:
     private_key: {{gpaddon-git-key}}
     uri: {{gpaddon-git-remote}}
 
+- name: docker-in-concourse
+  type: git
+  source:
+    uri: git@github.com:pivotal/docker-in-concourse
+    private_key: ((docker-in-concourse-github-key))
+
 {% if "UD" in test_sections %}
 - name: pxf_src
   type: git
@@ -471,6 +479,12 @@ resources:
   type: docker-image
   source:
     repository: pivotaldata/ubuntu-gpdb-debian-dev
+    tag: '16.04'
+
+- name: ubuntu-gpcloud-dev-16
+  type: docker-image
+  source:
+    repository: pivotaldata/ubuntu-gpcloud-dev
     tag: '16.04'
 
 - name: centos-mingw
@@ -589,6 +603,15 @@ resources:
     region_name: {{aws-region}}
     secret_access_key: {{bucket-secret-access-key}}
     versioned_file: {{bin_gpdb_sles11_versioned_file}}
+
+- name: bin_gpdb_ubuntu16
+  type: s3
+  source:
+    access_key_id: {{bucket-access-key-id}}
+    bucket: {{bucket-name}}
+    region_name: {{aws-region}}
+    secret_access_key: {{bucket-secret-access-key}}
+    versioned_file: {{bin_gpdb_ubuntu_versioned_file}}
 
 - name: bin_gpdb_windows_clients
   type: s3
@@ -1175,6 +1198,46 @@ jobs:
       file: gpdb_artifacts/greenplum-loaders-*-sles11-x86_64.zip
 
 - name: compile_gpdb_ubuntu16
+  - aggregate:
+    - get: reduced-frequency-trigger
+      trigger: ((reduced-frequency-trigger-flag))
+    - get: gpdb_src
+      passed: [gate_compile_start]
+      trigger: ((gpdb_src-trigger-flag))
+    - get: gpaddon_src
+      passed: [gate_compile_start]
+    - get: docker-in-concourse
+      passed: [gate_compile_start]
+    - get: ubuntu-gcloud-dev-16
+      passed: [gate_compile_start]
+  - task: compile_gpdb
+    image: ubuntu-gpcloud-dev-16
+    priviledged: true
+    config:
+      platform: linux
+      inputs:
+      - name: gpdb_src
+      - name: gpaddon_src
+      - name: docker-in-concourse
+      outputs:
+      - name: gpdb_artifacts
+      run:
+        path: 'bash'
+        args:
+          - -ec
+          - |
+            . docker-in-concourse/dind.bash
+            max_concurrent_downloads=4
+            max_concurrent_uploads=4
+            start_docker ${max_concurrent_downloads} ${max_concurrent_uploads} "" ""
+            cp -r gpaddon_src/* gpdb_src/gpAux/addon
+            make -C gpdb_src/src/tools/docker/ubuntu16
+            cp /tmp/bin_gpdb.tar.gz gpdb_artifacts/
+  - put: bin_gpdb_ubuntu16
+    params:
+      file: gpdb_artifacts/bin_gpdb.tar.gz
+
+- name: compile_gpdb_ubuntu16_oss
   plan:
   - aggregate:
     - get: reduced-frequency-trigger
@@ -1398,6 +1461,7 @@ jobs:
       - compile_gpdb_centos7
       - compile_gpdb_sles11
       - compile_gpdb_ubuntu16
+      - compile_gpdb_ubuntu16_oss
       trigger: true
     - get: bin_gpdb_sles11
       passed:
@@ -1413,10 +1477,10 @@ jobs:
       - compile_gpdb_centos6
     - get: compiled_bits_ubuntu16
       passed:
-      - compile_gpdb_ubuntu16
+      - compile_gpdb_ubuntu16_oss
     - get: deb_package_ubuntu16
       passed:
-      - compile_gpdb_ubuntu16
+      - compile_gpdb_ubuntu16_oss
 
 {% if "ICW" in test_sections %}
 ## ======================================================================
@@ -3606,6 +3670,7 @@ jobs:
       - compile_gpdb_centos7
       - compile_gpdb_sles11
       - compile_gpdb_ubuntu16
+      - compile_gpdb_ubuntu16_oss
       - compile_gpdb_windows_cl
       - compile_gpdb_aix7_remote
       - icw_planner_centos6
