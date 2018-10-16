@@ -8,6 +8,9 @@ dist: Dockerfile_dist $(GPAUX_DIR)/addon/README
 	$(info $@ ...)
 	docker build --iidfile dist --tag ubuntu_ent_build:16.04_dist \
 		--file Dockerfile_dist $(BUILD_DIR)
+	docker run -it --rm -v /tmp:/tmp ubuntu_ent_build:16.04_dist bash -c "\
+		tar czvf /tmp/gpdb_bin.tar.gz /usr/local/greenplum-db-devel/
+	"
 
 $(GPAUX_DIR)/addon/README:
 	$(info $@ ...)
